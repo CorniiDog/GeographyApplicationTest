@@ -1,5 +1,12 @@
-cartopy 
-metpy 
-goes2go
-git+https://github.com/blaylockbk/Carpenter_Workshop.git
 matplotlib==3.8.0
+cartopy  
+goes2go
+plotly
+git+https://github.com/blaylockbk/Carpenter_Workshop.git
+contextily
+geopandas
+geodatasets
+opencv-python
+opencv-contrib-python
+pip install git+https://github.com/sberbank-ai/Real-ESRGAN.git
+huggingface_hub==0.25.2
