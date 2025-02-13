@@ -1,0 +1,5 @@
+cartopy 
+metpy 
+goes2go
+git+https://github.com/blaylockbk/Carpenter_Workshop.git
+matplotlib==3.8.0
