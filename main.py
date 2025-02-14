@@ -24,20 +24,24 @@ import datetime
 
 # Define the bounding box in lat/lon (Texas region)
 lon_min, lat_min, lon_max, lat_max = -106.64719063660635, 25.840437651866516, -93.5175532104321, 36.50050935248352
-bbox_width = np.abs(lon_max - lon_min)
-bbox_height = np.abs(lat_min - lat_max)
-
-buffer_pct = 0.2
-buffer_width = bbox_width * buffer_pct
-buffer_height = bbox_height  * buffer_pct
-
 # Load GOES-16 data
-dt = datetime.datetime(2020, 11, 16, 18, 0, 0)
+#dt = datetime.datetime(2020, 11, 16, 18, 0, 0)
+
+dt = datetime.datetime.now()
 
 g = goes_nearesttime(dt, product='ABI', satellite='goes16', domain='C')
 
 image_specializations = ['NaturalColor', 'AirMass', 'DayCloudPhase', 'DayCloudConvection','WaterVapor']
 selected_specialization = image_specializations[2]
+cities_border_buffer_pct = 0.2
+
+# For DayCloudPhase: https://www.star.nesdis.noaa.gov/goes/conus_band.php?sat=G16&band=DayCloudPhase&length=12
+
+bbox_width = np.abs(lon_max - lon_min)
+bbox_height = np.abs(lat_min - lat_max)
+buffer_width = bbox_width * cities_border_buffer_pct
+buffer_height = bbox_height  * cities_border_buffer_pct
+
 
 fig = plt.figure(figsize=(15, 12))
 
@@ -73,7 +77,7 @@ ax16_zoom.set_extent([lon_min, lon_max, lat_min, lat_max], crs=ccrs.PlateCarree(
 # 2. Add state and country names dynamically
 ax16_zoom.add_feature(cfeature.BORDERS, edgecolor='black', linewidth=1)
 ax16_zoom.add_feature(cfeature.LAND)
-text = ax16_zoom.text(-99.5, 31, "Texas", transform=ccrs.PlateCarree(), fontsize=15, weight="bold", zorder=10)
+text = ax16_zoom.text(-99.5, 31, s="Texas", transform=ccrs.PlateCarree(), fontsize=15, weight="bold", zorder=10, ha='center', va='center')
 
 text.set_path_effects([
     path_effects.Stroke(linewidth=2, foreground='white'),  # White outline
@@ -96,7 +100,7 @@ texas_cities = pd.concat([texas_cities, houston], ignore_index=True)
 
 for _, row in texas_cities.iterrows():
     text = ax16_zoom.text(row.geometry.x, row.geometry.y, row['NAME'], transform=ccrs.PlateCarree(),
-                   fontsize=8, color="black", weight="bold", zorder=10)
+                   fontsize=8, color="black", weight="bold", zorder=10, ha='center', va='center')
     text.set_path_effects([
         path_effects.Stroke(linewidth=2, foreground='white'),  # White outline
         path_effects.Normal()  # Normal text rendering
