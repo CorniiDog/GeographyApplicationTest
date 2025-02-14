@@ -41,8 +41,7 @@ for i, dt in enumerate(datetimes):
 
 
     # Identify nearest time
-    G_info = goes_nearesttime(dt, product='ABI', satellite='goes16', domain='C', return_as='filelist')
-    actual_time = G_info.attrs['start']
+    actual_time = pd.to_datetime(G.time_coverage_start.item())
         
     ax.text(
         0.05, 0.05,  # Position (X, Y) in figure coordinates
