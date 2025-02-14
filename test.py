@@ -10,16 +10,19 @@ import numpy as np
 import matplotlib.patheffects as path_effects
 from shapely.geometry import Point
 import geopandas as gpd
-
+import io
 
 # Set up parameters
-end_dt = datetime.datetime.now()
-step_delta = datetime.timedelta(minutes=10)
-start_dt = end_dt - datetime.timedelta(hours=2)
 
-datetimes = [start_dt]
-while datetimes[-1] < end_dt:
-    datetimes.append(datetimes[-1] + step_delta)
+gif_duration_seconds = 2
+end_dt = datetime.datetime.now()
+start_dt = end_dt - datetime.timedelta(days=1)
+step_delta = datetime.timedelta(hours=1)
+
+datetimes = [end_dt]
+while datetimes[-1] > start_dt:
+    datetimes.append(datetimes[-1] - step_delta)
+datetimes = datetimes[::-1]  # Reverse to get chronological order from start_dt to end_dt
 
 # Directory to store frames
 frame_dir = "frames"
@@ -32,7 +35,7 @@ for i, dt in enumerate(datetimes):
 
     # Create figure
     fig, ax = plt.subplots(subplot_kw={'projection': G.rgb.crs})
-    ax.imshow(G.rgb.TrueColor(night_IR=False), **G.rgb.imshow_kwargs)
+    ax.imshow(G.rgb.TrueColor(night_IR=True), **G.rgb.imshow_kwargs)
     ax.coastlines()
     common_features('50m', ax=ax, STATES=True, color='white', dark=True)
 
@@ -68,13 +71,18 @@ for i, dt in enumerate(datetimes):
             path_effects.Normal()  # Normal text rendering
         ])
     
-    frame_path = os.path.join(frame_dir, f"frame_{i}.png")
-    plt.savefig(frame_path)
+    # Save figure to an in-memory buffer.
+    buf = io.BytesIO()
+    plt.savefig(buf, format='png', bbox_inches='tight')
+    buf.seek(0)
+    frame = imageio.imread(buf)
+    frames.append(frame)
+    buf.close()
     plt.close(fig)
-    frames.append(frame_path)
 
-# Create GIF with looping enabled and specified duration
+# Create GIF directly from frames in memory.
+duration_per_frame = 1000 * gif_duration_seconds / len(frames)
 output_gif = "goes_animation.gif"
-imageio.mimsave(output_gif, [imageio.imread(frame) for frame in frames], duration=0.2, loop=0)
+imageio.mimsave(output_gif, frames, format='GIF', duration=duration_per_frame, loop=0)
 
 print(f"GIF saved as {output_gif}")

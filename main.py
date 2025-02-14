@@ -12,7 +12,9 @@ import cartopy.feature as cfeature
 import contextily as ctx
 import geopandas as gpd
 from goes2go.data import goes_nearesttime, goes_latest
-from toolbox.cartopy_tools_OLD import common_features
+from toolbox.cartopy_tools_OLD import common_features, pc
+from toolbox.wind import spddir_to_uv
+from paint.standard2 import cm_wind
 import matplotlib.patheffects as path_effects
 from scipy.ndimage import zoom
 import cv2
@@ -20,28 +22,51 @@ from cv2 import dnn_superres
 import xarray as xr
 from shapely.geometry import Point
 import datetime
+from rasterio.transform import rowcol
+
 
 
 # Define the bounding box in lat/lon (Texas region)
 lon_min, lat_min, lon_max, lat_max = -106.64719063660635, 25.840437651866516, -93.5175532104321, 36.50050935248352
 # Load GOES-16 data
 #dt = datetime.datetime(2020, 11, 16, 18, 0, 0)
+# dt = datetime.datetime(2021,2, 1, 8, 55) # 2021 winter storm
+dt = datetime.datetime(2024, 12, 29, 18, 0) # 2024 storm
+#dt = datetime.datetime.now()
 
-dt = datetime.datetime.now()
+show_states = True
+show_roads = True
+
+# All RGB Recipes: https://blaylockbk.github.io/goes2go/_build/html/reference_guide/index.html#rgb-recipes
+# Useful recipes for clouds: 'DayCloudPhase' 'NighttimeMicrophysics' 'DayNightCloudMicroCombo'
+rgb_recipe = 'DayNightCloudMicroCombo'
+cities_border_buffer_pct = 0.2
+pct_dark_to_consider_night = 0.8 # For 'DayNightCloudMicroCombo'
 
 g = goes_nearesttime(dt, product='ABI', satellite='goes16', domain='C')
+gwnd = goes_nearesttime(dt, product='ABI-L2-DMWV', domain='C')
 
-image_specializations = ['NaturalColor', 'AirMass', 'DayCloudPhase', 'DayCloudConvection','WaterVapor']
-selected_specialization = image_specializations[2]
-cities_border_buffer_pct = 0.2
+# More info: https://www.star.nesdis.noaa.gov/goes/documents/ABIQuickGuide_DayNightCloudMicroCombo.pdf
 
-# For DayCloudPhase: https://www.star.nesdis.noaa.gov/goes/conus_band.php?sat=G16&band=DayCloudPhase&length=12
+
+def compute_darkness(img_rgb):
+    
+    return 1 - np.nanmean(np.max(img_rgb, axis=2))
+
+if rgb_recipe == 'DayNightCloudMicroCombo':
+    pct_black = compute_darkness(g.rgb.NaturalColor())
+    print("Pct black:", f"{pct_black:.5}%")
+    if pct_black > pct_dark_to_consider_night:
+        rgb_recipe = 'NighttimeMicrophysics'
+    else:
+        rgb_recipe = 'DayCloudPhase'
+
+
 
 bbox_width = np.abs(lon_max - lon_min)
 bbox_height = np.abs(lat_min - lat_max)
 buffer_width = bbox_width * cities_border_buffer_pct
 buffer_height = bbox_height  * cities_border_buffer_pct
-
 
 fig = plt.figure(figsize=(15, 12))
 
@@ -55,15 +80,13 @@ ax16_wide = fig.add_subplot(1, 2, 1, projection=g.rgb.crs)
 ax16_zoom = fig.add_subplot(1, 2, 2, projection=ccrs.PlateCarree())
 
 # Add coastlines, state borders, and country borders
-common_features('50m', ax=ax16_wide, STATES=True, color='white', dark=True)
-common_features('10m', ax=ax16_zoom, STATES=True, ROADS=True, color='white', dark=True)
+common_features('50m', ax=ax16_wide, STATES=show_states, color='white', dark=True)
+common_features('10m', ax=ax16_zoom, STATES=show_states, ROADS=show_roads, color='white', dark=True)
 
-# Convert image to uint8 if necessary to avoid grayscale issues
-img_rgb = getattr(g.rgb, selected_specialization)()
-
+img_rgb = getattr(g.rgb, rgb_recipe)()
 
 # Wide view: GOES-East Image
-ax16_wide.set_title(f'GOES-East View', loc='left', fontweight='bold')
+ax16_wide.set_title(f'GOES-East View: {rgb_recipe}', loc='left', fontweight='bold')
 ax16_wide.set_title(f'{str_date_16}', loc='right')
 ax16_wide.imshow(img_rgb, **g.rgb.imshow_kwargs)
 
@@ -113,6 +136,21 @@ left, right, bottom, top = ax16_zoom.get_extent()
 lons = [left, right, right, left, left]
 lats = [top, top, bottom, bottom, top]
 ax16_wide.plot(lons, lats, transform=ccrs.PlateCarree())
+
+gu, gv = spddir_to_uv(gwnd.wind_speed, gwnd.wind_direction)
+
+axes = [ax16_wide, ax16_zoom]
+for ax in axes:
+    ax.barbs(
+        gwnd.lon.data,
+        gwnd.lat.data,
+        gu.data,
+        gv.data,
+        gwnd.wind_speed,
+        **cm_wind().cmap_kwargs,
+        length=5,
+        transform=pc,
+    )
 
 gl = ax16_zoom.gridlines(crs=ccrs.PlateCarree(), draw_labels=True,
                          linewidth=0.5, color='gray', alpha=0.5, linestyle='--')
