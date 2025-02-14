@@ -4,7 +4,7 @@
 1. [CTRL] + [SHIFT] + [P]
 1. Select Interpreter
 1. Create a .venv within the project
-1. pip install -r requirements.txt
+1. Run in terminal: `pip install -r requirements.txt`
 1. Documentation: https://blaylockbk.github.io/goes2go/_build/html/
 
 
