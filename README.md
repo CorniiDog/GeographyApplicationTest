@@ -9,13 +9,17 @@
 
 
 When you run: `python test.py`:
+
 ![GOES Animation](references/GoesAnimationExample.gif)
 
-When you run `python main.py`
+When you run `python main.py`:
+
 ![DayClouds Plot](references/DayCloudPhaseExample.png)
 
 Which refers to the key:
+
 ![DayCloudsDictinction](references/DayCloudsDistinction.png)
 
 Note: If it switches to `NighttimeMicrophysics` instead of `DayCloudPhase`, refer to:
+
 ![NightCloudsDictinction](references/NightTimeDistinction.png)
