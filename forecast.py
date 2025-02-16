@@ -155,7 +155,9 @@ def download_psv_files(year, lat_min, lat_max, lon_min, lon_max, save_dir="forec
             try:
                 mod_time = os.path.getmtime(file_path)
                 mod_datetime = datetime.datetime.fromtimestamp(mod_time)
-                if year < mod_datetime.year:
+
+                now = datetime.datetime.now()
+                if year < mod_datetime.year or mod_datetime.date() == now.date():
                     print("Using cache")
                     get_new_file = False
             except:
