@@ -14,10 +14,10 @@ import io
 
 # Set up parameters
 
-gif_duration_seconds = 2
+gif_duration_seconds = 1
 end_dt = datetime.datetime.now()
 start_dt = end_dt - datetime.timedelta(days=1)
-step_delta = datetime.timedelta(hours=1)
+step_delta = datetime.timedelta(hours=4)
 
 datetimes = [end_dt]
 while datetimes[-1] > start_dt:

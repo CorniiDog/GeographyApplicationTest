@@ -11,3 +11,5 @@ opencv-contrib-python
 pip install git+https://github.com/sberbank-ai/Real-ESRGAN.git
 huggingface_hub==0.25.2
 imageio
+noaa-sdk
+netcdf4

@@ -33,8 +33,8 @@ latlon_additional_buffer = 0.1
 # Load GOES-16 data
 #dt = datetime.datetime(2020, 11, 16, 18, 0, 0)
 # dt = datetime.datetime(2021,2, 1, 8, 55) # 2021 winter storm
-dt = datetime.datetime(2024, 12, 29, 18, 0) # 2024 storm
-#dt = datetime.datetime.now()
+#dt = datetime.datetime(2024, 12, 29, 18, 0) # 2024 storm
+dt = datetime.datetime.now()
 
 show_state_outlines = True
 show_roads = True
@@ -47,7 +47,7 @@ rgb_recipe = 'DayNightCloudMicroCombo'
 cities_border_buffer_pct = 0.1
 pct_dark_to_consider_night = 0.8 # For 'DayNightCloudMicroCombo'
 
-g = goes_nearesttime(dt, product='ABI', satellite='goes16', domain='C')
+g = goes_nearesttime(dt, product='ABI', satellite='goes16', domain='F')
 # More info: https://www.star.nesdis.noaa.gov/goes/documents/ABIQuickGuide_DayNightCloudMicroCombo.pdf
 
 
