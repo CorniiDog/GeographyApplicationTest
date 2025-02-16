@@ -127,7 +127,7 @@ def add_to_file_not_found_list(file_url, file_name = 'file_not_found_list.json',
     
 
 
-def download_psv_files(year, lat_min, lat_max, lon_min, lon_max, save_dir="forecasts", validate=True) -> List[str]:
+def download_psv_files(year:int, lat_min:float, lat_max:float, lon_min:float, lon_max:float, save_dir="forecasts", validate=True, month:int|None=None) -> List[str]:
     """
     Downloads all PSV files for stations within the given latitude/longitude bounding box.
     """
@@ -145,6 +145,8 @@ def download_psv_files(year, lat_min, lat_max, lon_min, lon_max, save_dir="forec
 
     psv_files = []
 
+    now = datetime.datetime.now()
+
     for station in selected_stations:
         station_id = station["id"]
         url = PSV_BASE_URL.format(year=year, station=station_id)
@@ -156,8 +158,11 @@ def download_psv_files(year, lat_min, lat_max, lon_min, lon_max, save_dir="forec
                 mod_time = os.path.getmtime(file_path)
                 mod_datetime = datetime.datetime.fromtimestamp(mod_time)
 
-                now = datetime.datetime.now()
-                if year < mod_datetime.year or mod_datetime.date() == now.date():
+                same_year_older_month = month and month < mod_datetime.month and mod_datetime.year == year
+                same_day = mod_datetime.date() == now.date()
+                older_year = year < mod_datetime.year
+
+                if older_year or same_day or same_year_older_month:
                     print("Using cache")
                     get_new_file = False
             except:
@@ -168,6 +173,7 @@ def download_psv_files(year, lat_min, lat_max, lon_min, lon_max, save_dir="forec
                 print(f"Validating {file_path}")
                 try:
                     df = pd.read_csv(file_path, delimiter="|", low_memory=False)
+                                            
 
                     print(f"using cache: {file_path}")
                     psv_files.append(file_path)
