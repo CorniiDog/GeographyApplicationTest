@@ -16,7 +16,6 @@ class Station(TypedDict):
     alt: float
     name: str
 
-
 def parse_station_list(station_list_file = 'stations.json', _repeat_takes=0) -> List[Station]:
     """
     Downloads and parses the station list, returning a list of dictionaries with station data.
@@ -94,7 +93,7 @@ def get_file_not_found_list(file_name = 'file_not_found_list.json') -> List[str]
             mod_datetime = datetime.datetime.fromtimestamp(mod_time)
 
             dt_now = datetime.datetime.now()
-            if mod_datetime.month == dt_now.month and mod_datetime.year == dt_now.year:
+            if mod_datetime.year == dt_now.year:
                 get_new_file = False
         except:
             return []
@@ -127,7 +126,7 @@ def add_to_file_not_found_list(file_url, file_name = 'file_not_found_list.json',
     
 
 
-def download_psv_files(year:int, lat_min:float, lat_max:float, lon_min:float, lon_max:float, save_dir="forecasts", validate=True, month:int|None=None) -> List[str]:
+def download_psv_files(year:int, lat_min:float, lat_max:float, lon_min:float, lon_max:float, save_dir="forecasts", validate=True, month:int|None=None, day:int|None=None) -> List[str]:
     """
     Downloads all PSV files for stations within the given latitude/longitude bounding box.
     """
@@ -135,6 +134,7 @@ def download_psv_files(year:int, lat_min:float, lat_max:float, lon_min:float, lo
     # Filter stations within the bounding box
     selected_stations = get_stations_between_bbox(lat_min, lat_max, lon_min, lon_max)
     file_not_found_list = get_file_not_found_list()
+    print(f"Estimated valid stations found: {len(selected_stations) - len(file_not_found_list)}")
 
     if not selected_stations:
         print("No stations found within the given bounding box.")
@@ -146,8 +146,11 @@ def download_psv_files(year:int, lat_min:float, lat_max:float, lon_min:float, lo
     psv_files = []
 
     now = datetime.datetime.now()
+    len_stations = len(selected_stations)
+    for i, station in enumerate(selected_stations):
+        pct = 100*(i+1)/len_stations
+        print(f"{pct:.2f}%")
 
-    for station in selected_stations:
         station_id = station["id"]
         url = PSV_BASE_URL.format(year=year, station=station_id)
         file_path = os.path.join(save_dir, f"GHCNh_{station_id}_{year}.psv")
@@ -159,10 +162,11 @@ def download_psv_files(year:int, lat_min:float, lat_max:float, lon_min:float, lo
                 mod_datetime = datetime.datetime.fromtimestamp(mod_time)
 
                 same_year_older_month = month and month < mod_datetime.month and mod_datetime.year == year
+                same_year_older_day = day and month and same_year_older_month and day < (mod_datetime.day-2) # At least 2-3 days of buffer to allow forecast stations to update their data
                 same_day = mod_datetime.date() == now.date()
                 older_year = year < mod_datetime.year
 
-                if older_year or same_day or same_year_older_month:
+                if older_year or same_day or same_year_older_month or same_year_older_day:
                     print("Using cache")
                     get_new_file = False
             except:
@@ -192,14 +196,16 @@ def download_psv_files(year:int, lat_min:float, lat_max:float, lon_min:float, lo
                 continue
 
             try:
-                response = requests.get(url)
+                print(f"Contacting {url}")
+                response = requests.get(url, timeout=20)
                 if response.status_code == 200:
+                    print("Response received. Downloading...")
                     with open(file_path, "wb") as f:
                         f.write(response.content)
                     print(f"Downloaded: {file_path}")
                     psv_files.append(file_path)
                 else:
-                    print(f"File not found: {url}")
+                    print(f"File not found: {url}\nStatus Code: {response.status_code}")
                     add_to_file_not_found_list(url, file_not_found_list=file_not_found_list)
 
             except requests.RequestException as e:
@@ -208,6 +214,10 @@ def download_psv_files(year:int, lat_min:float, lat_max:float, lon_min:float, lo
     
     return psv_files
 
-# Example usage:
-# Download PSV files for 2023 within a bounding box (latitude 17 to 19, longitude -64 to -60)
-download_psv_files(2023, 17, 19, -64, -60)
+
+if __name__ == "__main__":
+    # Example usage:
+    # Download PSV files for 2023 within a bounding box (latitude 17 to 19, longitude -64 to -60)
+    lon_min, lat_min, lon_max, lat_max = -106.64719063660635, 25.840437651866516, -93.5175532104321, 36.50050935248352
+
+    psv_file_list = download_psv_files(2023, lat_min, lat_max, lon_min, lon_max)
