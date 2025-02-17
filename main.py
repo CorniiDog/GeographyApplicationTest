@@ -23,16 +23,18 @@ import xarray as xr
 from shapely.geometry import Point
 import datetime
 from rasterio.transform import rowcol
+import json
 
 import forecast_database
+
 
 forecast_database.DB_PATH = "forecasts.db"
 forecast_database.FORECAST_DIR = "forecasts"
 
-# Define the bounding box in lat/lon (Texas region)
-lon_min, lat_min, lon_max, lat_max = -106.64719063660635, 25.840437651866516, -93.5175532104321, 36.50050935248352
-
+# Find bounding box of a state
+state_of_interest = "Texas"
 latlon_additional_buffer = 0.1
+
 # Load GOES-16 data
 #dt = datetime.datetime(2020, 11, 16, 18, 0, 0)
 dt = datetime.datetime(2021,2, 1, 8, 55) # 2021 winter storm
@@ -58,6 +60,26 @@ news_header = 'temperature'
 rgb_recipe = 'AirMass'
 cities_border_buffer_pct = 0.1
 pct_dark_to_consider_night = 0.8 # For 'DayNightCloudMicroCombo'
+
+
+
+
+## Find and locate state information
+with open("state_bboxes.json", "r") as f:
+    state_bboxes = json.load(f)
+
+state_found = False
+for state_info in state_bboxes:
+
+    if state_info["state"].lower() == state_of_interest.lower():
+        bounds = state_info["bounds"]
+        lon_min, lat_min, lon_max, lat_max = bounds[0][0], bounds[0][1], bounds[1][0], bounds[1][1]
+        state_found = True
+    
+    print(state_info["state"], "Bounds:", state_info["bounds"])
+
+if not state_found:
+    raise(f"State not found: {state_of_interest}")
 
 g = goes_nearesttime(dt, product='ABI', satellite='goes16', domain='C')
 # More info: https://www.star.nesdis.noaa.gov/goes/documents/ABIQuickGuide_DayNightCloudMicroCombo.pdf
