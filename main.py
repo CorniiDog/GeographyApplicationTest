@@ -35,8 +35,8 @@ lon_min, lat_min, lon_max, lat_max = -106.64719063660635, 25.840437651866516, -9
 latlon_additional_buffer = 0.1
 # Load GOES-16 data
 #dt = datetime.datetime(2020, 11, 16, 18, 0, 0)
-#dt = datetime.datetime(2021,2, 1, 8, 55) # 2021 winter storm
-dt = datetime.datetime(2023,2, 1, 8, 55) # 2021 winter storm
+dt = datetime.datetime(2021,2, 1, 8, 55) # 2021 winter storm
+#dt = datetime.datetime(2023,2, 1, 8, 55) # 2021 winter storm
 #dt = datetime.datetime(2024, 12, 29, 18, 0) # 2024 storm
 #dt = datetime.datetime.now()
 
@@ -44,10 +44,9 @@ buffer_time = pd.Timedelta(minutes=10)
 
 show_state_outlines = True
 show_roads = True
-show_wind = True
+show_wind = False
 show_city_names = True
 show_weather_stations = True
-force_weather_download = False
 
 news_header = 'temperature'
 
