@@ -125,7 +125,7 @@ def add_to_file_not_found_list(file_url, file_name = 'file_not_found_list.json')
     
 
 
-def download_psv_files(year:int, lat_min:float, lat_max:float, lon_min:float, lon_max:float, save_dir="forecasts", validate=True, month:int|None=None, day:int|None=None) -> List[str]:
+def download_psv_files(year:int, lat_min:float, lat_max:float, lon_min:float, lon_max:float, save_dir="forecasts", validate=True, month:int|None=None, day:int|None=None, force_download=False) -> List[str]:
     """
     Downloads all PSV files for stations within the given latitude/longitude bounding box.
     """
@@ -165,7 +165,7 @@ def download_psv_files(year:int, lat_min:float, lat_max:float, lon_min:float, lo
                 same_day = mod_datetime.date() == now.date()
                 older_year = year < mod_datetime.year
 
-                if older_year or same_day or same_year_older_month or same_year_older_day:
+                if (older_year or same_day or same_year_older_month or same_year_older_day) and not force_download:
                     print("Using cache")
                     get_new_file = False
             except:

@@ -135,20 +135,20 @@ def add_to_database(psv_file: str):
     print(f"Data from '{psv_file}' added to the database.")
 
 
-def get_nearest_station_dt_data(dt: datetime.datetime, lat_min, lat_max, lon_min, lon_max, timedelta = pd.Timedelta(days=1), unique=True) -> pd.DataFrame:
+def get_nearest_station_dt_data(dt: datetime.datetime, lat_min, lat_max, lon_min, lon_max, timedelta = pd.Timedelta(days=1), unique=True, _tries=0) -> pd.DataFrame:
 
 
   resultant_db_data = get_data_within_one_day(dt, timedelta)
   print("Resultant db:",resultant_db_data)
-  if len(resultant_db_data) == 0: # Nothing
+  if len(resultant_db_data) == 0 and _tries < 1: # No data and haven't tried before
       print("No data found in database... Adding")
-      forecast_files = forecast_downloader.download_psv_files(dt.year, lat_min, lat_max, lon_min, lon_max, month=dt.month, day=dt.day, save_dir=FORECAST_DIR)
+      forecast_files = forecast_downloader.download_psv_files(dt.year, lat_min, lat_max, lon_min, lon_max, month=dt.month, day=dt.day, save_dir=FORECAST_DIR, force_download=True)
       len_files = len(forecast_files)
       for i, file in enumerate(forecast_files):
           pct = 100*(i+1)/len_files
           print(f"{pct:.2f}%")
           add_to_database(file)
-      return get_nearest_station_dt_data(dt, lat_min, lat_max, lon_min, lon_max, timedelta, unique)
+      return get_nearest_station_dt_data(dt, lat_min, lat_max, lon_min, lon_max, timedelta, unique, _tries + 1)
   
   # **Ensure unique Station_IDs, keeping the most recent DATE**
   if unique:

@@ -47,6 +47,7 @@ show_roads = True
 show_wind = True
 show_city_names = True
 show_weather_stations = True
+force_weather_download = False
 
 news_header = 'temperature'
 
