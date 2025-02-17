@@ -137,10 +137,13 @@ def add_to_database(psv_file: str):
 
 def get_nearest_station_dt_data(dt: datetime.datetime, lat_min, lat_max, lon_min, lon_max, timedelta = pd.Timedelta(days=1), unique=True, _tries=0) -> pd.DataFrame:
 
+  exhausted_takes = not (_tries < 2)
+  if exhausted_takes:
+      print("Multiple tries exceeded with getting forecast data. Returning what is possible.")
 
   resultant_db_data = get_data_within_one_day(dt, timedelta)
   print("Resultant db:",resultant_db_data)
-  if len(resultant_db_data) == 0 and _tries < 1: # No data and haven't tried before
+  if len(resultant_db_data) == 0 and not exhausted_takes:
       print("No data found in database... Adding")
       forecast_files = forecast_downloader.download_psv_files(dt.year, lat_min, lat_max, lon_min, lon_max, month=dt.month, day=dt.day, save_dir=FORECAST_DIR, force_download=True)
       len_files = len(forecast_files)

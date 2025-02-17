@@ -37,8 +37,8 @@ latlon_additional_buffer = 0.1
 
 # Load GOES-16 data
 #dt = datetime.datetime(2020, 11, 16, 18, 0, 0)
-dt = datetime.datetime(2021,2, 1, 8, 55) # 2021 winter storm
-#dt = datetime.datetime(2023,2, 1, 8, 55) # 2021 winter storm
+#dt = datetime.datetime(2021,2, 1, 8, 55) # 2021 winter storm
+dt = datetime.datetime(2022,2, 1, 8, 55)
 #dt = datetime.datetime(2024, 12, 29, 18, 0) # 2024 storm
 #dt = datetime.datetime.now()
 
@@ -70,13 +70,11 @@ with open("state_bboxes.json", "r") as f:
 
 state_found = False
 for state_info in state_bboxes:
-
     if state_info["state"].lower() == state_of_interest.lower():
         bounds = state_info["bounds"]
         lon_min, lat_min, lon_max, lat_max = bounds[0][0], bounds[0][1], bounds[1][0], bounds[1][1]
         state_found = True
-    
-    print(state_info["state"], "Bounds:", state_info["bounds"])
+        print(f"Identified {state_info["state"]}.", "Bounds:", state_info["bounds"])
 
 if not state_found:
     raise(f"State not found: {state_of_interest}")
@@ -106,6 +104,14 @@ bbox_width = np.abs(lon_max - lon_min)
 bbox_height = np.abs(lat_min - lat_max)
 buffer_width = bbox_width * cities_border_buffer_pct
 buffer_height = bbox_height  * cities_border_buffer_pct
+
+def is_recent(dt, days=120):
+    return dt >= datetime.datetime.now() - datetime.timedelta(days=days)
+
+days = 120
+if is_recent(dt, days):
+    print(f"The date {dt} must be at least {days} days from now to obtain weather. Disabling weather station options.")
+    show_weather_stations = False
 
 if show_weather_stations:
     weater_data = forecast_database.get_nearest_station_dt_data(dt, lat_min, lat_max, lon_min, lon_max, timedelta=buffer_time, unique=True)
@@ -190,6 +196,10 @@ left, right, bottom, top = ax16_zoom.get_extent()
 lons = [left, right, right, left, left]
 lats = [top, top, bottom, bottom, top]
 ax16_wide.plot(lons, lats, transform=ccrs.PlateCarree())
+
+if dt < datetime.datetime(2021, 5):
+    print(f"The date {dt} must be after may 2021 to retreive wind barb information. Disabling wind barbs.")
+    show_wind = False
 
 if show_wind:
     gwnd = goes_nearesttime(dt, product='ABI-L2-DMWVC')
