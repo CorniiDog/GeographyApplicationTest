@@ -24,7 +24,10 @@ from shapely.geometry import Point
 import datetime
 from rasterio.transform import rowcol
 
+import forecast_database
 
+forecast_database.DB_PATH = "forecasts.db"
+forecast_database.FORECAST_DIR = "forecasts"
 
 # Define the bounding box in lat/lon (Texas region)
 lon_min, lat_min, lon_max, lat_max = -106.64719063660635, 25.840437651866516, -93.5175532104321, 36.50050935248352
@@ -32,24 +35,32 @@ lon_min, lat_min, lon_max, lat_max = -106.64719063660635, 25.840437651866516, -9
 latlon_additional_buffer = 0.1
 # Load GOES-16 data
 #dt = datetime.datetime(2020, 11, 16, 18, 0, 0)
-# dt = datetime.datetime(2021,2, 1, 8, 55) # 2021 winter storm
+#dt = datetime.datetime(2021,2, 1, 8, 55) # 2021 winter storm
+dt = datetime.datetime(2023,2, 1, 8, 55) # 2021 winter storm
 #dt = datetime.datetime(2024, 12, 29, 18, 0) # 2024 storm
-dt = datetime.datetime.now()
+#dt = datetime.datetime.now()
+
+buffer_time = pd.Timedelta(minutes=10)
 
 show_state_outlines = True
 show_roads = True
 show_wind = True
 show_city_names = True
+show_weather_stations = True
+
+news_header = 'temperature'
 
 # All RGB Recipes: https://blaylockbk.github.io/goes2go/_build/html/reference_guide/index.html#rgb-recipes
 # Useful recipes for clouds: 'DayCloudPhase' 'NighttimeMicrophysics' 'DayNightCloudMicroCombo'
-rgb_recipe = 'DayNightCloudMicroCombo'
+# Other recipes: AirMass Ash DayCloudConvection DayCloudPhase DayConvection DayLandCloud DayLandCloudFire
+# DaySnowFog DifferentialWaterVapor Dust FireTemperature NaturalColor NightFogDifference NighttimeMicrophysics
+# RocketPlume SulfurDioxide TrueColor WaterVapor
+rgb_recipe = 'AirMass'
 cities_border_buffer_pct = 0.1
 pct_dark_to_consider_night = 0.8 # For 'DayNightCloudMicroCombo'
 
-g = goes_nearesttime(dt, product='ABI', satellite='goes16', domain='F')
+g = goes_nearesttime(dt, product='ABI', satellite='goes16', domain='C')
 # More info: https://www.star.nesdis.noaa.gov/goes/documents/ABIQuickGuide_DayNightCloudMicroCombo.pdf
-
 
 def compute_darkness(img_rgb):
     
@@ -73,6 +84,10 @@ bbox_width = np.abs(lon_max - lon_min)
 bbox_height = np.abs(lat_min - lat_max)
 buffer_width = bbox_width * cities_border_buffer_pct
 buffer_height = bbox_height  * cities_border_buffer_pct
+
+if show_weather_stations:
+    weater_data = forecast_database.get_nearest_station_dt_data(dt, lat_min, lat_max, lon_min, lon_max, timedelta=buffer_time, unique=True)
+
 
 fig = plt.figure(figsize=(15, 12))
 
@@ -139,7 +154,14 @@ if show_city_names:
             path_effects.Normal()  # Normal text rendering
         ])
     
-
+if show_weather_stations:
+    for _, row in weater_data.iterrows():
+        text = ax16_zoom.text(float(row['Longitude']), float(row['Latitude']), str(row[news_header]), transform=ccrs.PlateCarree(),
+                    fontsize=5, color="yellow", weight="bold", zorder=9, ha='center', va='center')
+        text.set_path_effects([
+            path_effects.Stroke(linewidth=1, foreground='black'),  # White outline
+            path_effects.Normal()  # Normal text rendering
+        ])
 
 # Draw bounding box on wide view
 left, right, bottom, top = ax16_zoom.get_extent()

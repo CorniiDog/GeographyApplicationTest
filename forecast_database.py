@@ -5,7 +5,9 @@ import os
 import pandas as pd
 
 DB_PATH = "forecasts.db"
+FORECAST_DIR = "forecasts"
 TABLE_NAME = "climate"  # Table name
+VERBOSE = False
 
 def create_database_if_dont_exist():
     if not os.path.exists(DB_PATH):  # Check if the database file exists
@@ -123,20 +125,24 @@ def add_to_database(psv_file: str):
                 VALUES ({placeholders})
             """, values)
         except sqlite3.IntegrityError:
-            print(f"Skipped duplicate entry: DATE={row['DATE']}, Station_ID={row['Station_ID']}")
+            if VERBOSE:
+                print(f"Skipped duplicate entry: DATE={row['DATE']}, Station_ID={row['Station_ID']}")
+            else:
+                pass
 
     conn.commit()
     conn.close()
     print(f"Data from '{psv_file}' added to the database.")
 
 
-def get_nearest_station_dt_data(dt: datetime.datetime, lat_min, lat_max, lon_min, lon_max, timedelta = pd.Timedelta(days=1), unique=False) -> pd.DataFrame:
+def get_nearest_station_dt_data(dt: datetime.datetime, lat_min, lat_max, lon_min, lon_max, timedelta = pd.Timedelta(days=1), unique=True) -> pd.DataFrame:
 
 
   resultant_db_data = get_data_within_one_day(dt, timedelta)
+  print("Resultant db:",resultant_db_data)
   if len(resultant_db_data) == 0: # Nothing
       print("No data found in database... Adding")
-      forecast_files = forecast_downloader.download_psv_files(dt.year, lat_min, lat_max, lon_min, lon_max, month=dt.month, day=dt.day)
+      forecast_files = forecast_downloader.download_psv_files(dt.year, lat_min, lat_max, lon_min, lon_max, month=dt.month, day=dt.day, save_dir=FORECAST_DIR)
       len_files = len(forecast_files)
       for i, file in enumerate(forecast_files):
           pct = 100*(i+1)/len_files
@@ -150,10 +156,13 @@ def get_nearest_station_dt_data(dt: datetime.datetime, lat_min, lat_max, lon_min
   
   return resultant_db_data
 
-
-lon_min, lat_min, lon_max, lat_max = -106.64719063660635, 25.840437651866516, -93.5175532104321, 36.50050935248352
-dt = datetime.datetime(2023, 6,4, hour=6, minute=30)
-buffer_time = pd.Timedelta(minutes=30)
-unique=True
-data = get_nearest_station_dt_data(dt, lat_min, lat_max, lon_min, lon_max, timedelta=buffer_time, unique=unique)
-print(data)
+if __name__ == "__main__":
+    lon_min, lat_min, lon_max, lat_max = -106.64719063660635, 25.840437651866516, -93.5175532104321, 36.50050935248352
+    dt = datetime.datetime(2023, 6,4, hour=6, minute=30)
+    buffer_time = pd.Timedelta(minutes=30)
+    unique=True
+    data = get_nearest_station_dt_data(dt, lat_min, lat_max, lon_min, lon_max, timedelta=buffer_time, unique=unique)
+    
+    for key in data.keys():
+        print(key)
+    print(data)

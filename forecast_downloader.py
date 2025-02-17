@@ -93,7 +93,7 @@ def get_file_not_found_list(file_name = 'file_not_found_list.json') -> List[str]
             mod_datetime = datetime.datetime.fromtimestamp(mod_time)
 
             dt_now = datetime.datetime.now()
-            if mod_datetime.year == dt_now.year:
+            if mod_datetime.year == dt_now.year and mod_datetime.month == mod_datetime.month:
                 get_new_file = False
         except:
             return []
@@ -111,10 +111,9 @@ def get_file_not_found_list(file_name = 'file_not_found_list.json') -> List[str]
             return []
     return []
 
-def add_to_file_not_found_list(file_url, file_name = 'file_not_found_list.json', file_not_found_list=None):
+def add_to_file_not_found_list(file_url, file_name = 'file_not_found_list.json'):
 
-    if not file_not_found_list:
-        file_not_found_list = get_file_not_found_list(file_name)
+    file_not_found_list = get_file_not_found_list(file_name)
 
     if file_url not in file_not_found_list:
         file_not_found_list.append(file_url)
@@ -134,7 +133,7 @@ def download_psv_files(year:int, lat_min:float, lat_max:float, lon_min:float, lo
     # Filter stations within the bounding box
     selected_stations = get_stations_between_bbox(lat_min, lat_max, lon_min, lon_max)
     file_not_found_list = get_file_not_found_list()
-    print(f"Estimated valid stations found: {len(selected_stations) - len(file_not_found_list)}")
+    print(f"Estimated valid stations found: {len(selected_stations)}")
 
     if not selected_stations:
         print("No stations found within the given bounding box.")
@@ -206,11 +205,11 @@ def download_psv_files(year:int, lat_min:float, lat_max:float, lon_min:float, lo
                     psv_files.append(file_path)
                 else:
                     print(f"File not found: {url}\nStatus Code: {response.status_code}")
-                    add_to_file_not_found_list(url, file_not_found_list=file_not_found_list)
+                    add_to_file_not_found_list(url)
 
             except requests.RequestException as e:
                 print(f"Error downloading {url}: {e}")
-                add_to_file_not_found_list(url, file_not_found_list=file_not_found_list)
+                add_to_file_not_found_list(url)
     
     return psv_files
 
