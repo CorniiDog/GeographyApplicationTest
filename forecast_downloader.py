@@ -151,7 +151,9 @@ def download_psv_files(year:int, lat_min:float, lat_max:float, lon_min:float, lo
         print(f"{pct:.2f}%")
 
         station_id = station["id"]
+        
         url = PSV_BASE_URL.format(year=year, station=station_id)
+
         file_path = os.path.join(save_dir, f"GHCNh_{station_id}_{year}.psv")
 
         get_new_file = True

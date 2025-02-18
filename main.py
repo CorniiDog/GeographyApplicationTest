@@ -24,15 +24,29 @@ from shapely.geometry import Point
 import datetime
 from rasterio.transform import rowcol
 import json
+import os
 
 import forecast_database
 
+dir_to_use = "D:\\LightningParser"
 
-forecast_database.DB_PATH = "forecasts.db"
-forecast_database.FORECAST_DIR = "forecasts"
+os.makedirs(dir_to_use, exist_ok=True)
+
+forecast_database.DB_PATH = os.path.join(dir_to_use, "forecasts.db")
+forecast_database.FORECAST_DIR = os.path.join(dir_to_use, "forecasts")
 
 # Find bounding box of a state
 state_of_interest = "Texas"
+
+# 'state' : If region is a state
+# 'country' : If region is a country
+state_type = "state"
+
+# 'C': Contiguous United States (alias 'CONUS')
+# 'F': Full Disk (alias 'FULL')
+# 'M': Mesoscale (alias 'MESOSCALE')
+satellite_domain = 'F' 
+
 latlon_additional_buffer = 0.1
 
 # Load GOES-16 data
@@ -57,11 +71,9 @@ news_header = 'temperature'
 # Other recipes: AirMass Ash DayCloudConvection DayCloudPhase DayConvection DayLandCloud DayLandCloudFire
 # DaySnowFog DifferentialWaterVapor Dust FireTemperature NaturalColor NightFogDifference NighttimeMicrophysics
 # RocketPlume SulfurDioxide TrueColor WaterVapor
-rgb_recipe = 'AirMass'
+rgb_recipe = 'WaterVapor'
 cities_border_buffer_pct = 0.1
 pct_dark_to_consider_night = 0.8 # For 'DayNightCloudMicroCombo'
-
-
 
 
 ## Find and locate state information
@@ -70,20 +82,20 @@ with open("state_bboxes.json", "r") as f:
 
 state_found = False
 for state_info in state_bboxes:
-    if state_info["state"].lower() == state_of_interest.lower():
-        bounds = state_info["bounds"]
-        lon_min, lat_min, lon_max, lat_max = bounds[0][0], bounds[0][1], bounds[1][0], bounds[1][1]
-        state_found = True
-        print(f"Identified {state_info["state"]}.", "Bounds:", state_info["bounds"])
+    if state_type in state_info.keys():
+        if state_info[state_type].lower() == state_of_interest.lower():
+            bounds = state_info["bounds"]
+            lon_min, lat_min, lon_max, lat_max = bounds[0][0], bounds[0][1], bounds[1][0], bounds[1][1]
+            state_found = True
+            print(f"Identified {state_info[state_type]}.", "Bounds:", state_info["bounds"])
 
 if not state_found:
     raise(f"State not found: {state_of_interest}")
 
-g = goes_nearesttime(dt, product='ABI', satellite='goes16', domain='C')
+g = goes_nearesttime(dt, product='ABI', satellite='goes16', domain=satellite_domain)
 # More info: https://www.star.nesdis.noaa.gov/goes/documents/ABIQuickGuide_DayNightCloudMicroCombo.pdf
 
 def compute_darkness(img_rgb):
-    
     return 1 - np.nanmean(np.max(img_rgb, axis=2))
 
 if rgb_recipe == 'DayNightCloudMicroCombo':
@@ -99,11 +111,21 @@ lat_min -= latlon_additional_buffer
 lon_max += latlon_additional_buffer
 lat_max += latlon_additional_buffer
 
+middle_lon = np.average([lon_max, lon_min])
+middle_lat = np.average([lat_max, lat_min])
+
 
 bbox_width = np.abs(lon_max - lon_min)
 bbox_height = np.abs(lat_min - lat_max)
 buffer_width = bbox_width * cities_border_buffer_pct
 buffer_height = bbox_height  * cities_border_buffer_pct
+
+############################## TODO: Delete
+now = datetime.datetime.now()
+datetimes = [now - datetime.timedelta(days=365 * i) for i in range(21)][::-1]  # -20 years to 0
+for hist_dt in datetimes:
+    weater_data = forecast_database.get_nearest_station_dt_data(hist_dt, lat_min, lat_max, lon_min, lon_max, timedelta=buffer_time, unique=True)
+
 
 def is_recent(dt, days=120):
     return dt >= datetime.datetime.now() - datetime.timedelta(days=days)
@@ -149,24 +171,23 @@ ax16_zoom.set_extent([lon_min, lon_max, lat_min, lat_max], crs=ccrs.PlateCarree(
 # 2. Add state and country names dynamically
 ax16_zoom.add_feature(cfeature.BORDERS, edgecolor='black', linewidth=1)
 ax16_zoom.add_feature(cfeature.LAND)
-text = ax16_zoom.text(-99.5, 31, s="Texas", transform=ccrs.PlateCarree(), fontsize=15, color="white", weight="bold", zorder=10, ha='center', va='center')
+text = ax16_zoom.text(middle_lon, middle_lat, s=state_of_interest, transform=ccrs.PlateCarree(), fontsize=15, color="white", weight="bold", zorder=10, ha='center', va='center')
 
 text.set_path_effects([
     path_effects.Stroke(linewidth=2, foreground='black'),  # White outline
     path_effects.Normal()  # Normal text rendering
 ])
 
+
 # 3. Load city data and add city labels
-cities = gpd.read_file('populated_places\\ne_10m_populated_places.shp')
-
-# Create a GeoDataFrame row for Houston
-houston = gpd.GeoDataFrame({
-    'NAME': ['Houston'],
-    'geometry': [Point(-95.3698, 29.7604)]
-}, crs=cities.crs)
-
-
 if show_city_names:
+    cities = gpd.read_file('populated_places\\ne_10m_populated_places.shp')
+
+    # Create a GeoDataFrame row for Houston
+    houston = gpd.GeoDataFrame({
+        'NAME': ['Houston'],
+        'geometry': [Point(-95.3698, 29.7604)]
+    }, crs=cities.crs)
 
     # Append Houston to the Texas cities GeoDataFrame
     cities = pd.concat([cities, houston], ignore_index=True)
@@ -183,6 +204,9 @@ if show_city_names:
         ])
     
 if show_weather_stations:
+    for key in weater_data.keys():
+        print(key)
+
     for _, row in weater_data.iterrows():
         text = ax16_zoom.text(float(row['Longitude']), float(row['Latitude']), str(row[news_header]), transform=ccrs.PlateCarree(),
                     fontsize=5, color="yellow", weight="bold", zorder=9, ha='center', va='center')
@@ -197,7 +221,7 @@ lons = [left, right, right, left, left]
 lats = [top, top, bottom, bottom, top]
 ax16_wide.plot(lons, lats, transform=ccrs.PlateCarree())
 
-if dt < datetime.datetime(2021, 5):
+if dt < datetime.datetime(2021, 5, 1):
     print(f"The date {dt} must be after may 2021 to retreive wind barb information. Disabling wind barbs.")
     show_wind = False
 
