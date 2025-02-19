@@ -264,4 +264,7 @@ gl.right_labels = False
 
 # Adjust layout
 plt.subplots_adjust(wspace=0.01)
-plt.show()
+
+print("Outputting...")
+plt.savefig('output.png', dpi=300, bbox_inches='tight')
+#plt.show()
