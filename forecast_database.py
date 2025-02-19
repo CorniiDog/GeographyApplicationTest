@@ -9,8 +9,9 @@ import psutil
 DB_PATH = "forecasts.db"
 FORECAST_DIR = "forecasts"
 TABLE_NAME = "climate"  # Table name
-VERBOSE = False
+VERBOSE = True
 USE_CACHE = True
+VALIDATE_DATA = True
 
 # The percentage a database can be memory-stored onto RAM while processing new data
 # Set to 0.0 to go directly to disk (slow)
@@ -18,7 +19,7 @@ USE_CACHE = True
 # The system creates a virtual database in RAM/memory to avoid excessive read/write 
 # requests on the disk whenever new data passes. That way it speeds up processing 
 # by using the faster read and write speeds of RAM first.
-PCT_MEM_USAGE = 0.2
+PCT_MEM_USAGE = 0.1
 
 def create_database_if_dont_exist():
     if not os.path.exists(DB_PATH):  # Check if the database file exists
@@ -153,7 +154,7 @@ def _add_to_database(psv_file: str, conn:sqlite3.Connection):
         
         try:
             cursor.execute(f"""
-                INSERT INTO {TABLE_NAME} ({columns})
+                INSERT OR REPLACE INTO {TABLE_NAME} ({columns})
                 VALUES ({placeholders})
             """, values)
         except sqlite3.IntegrityError:
@@ -180,82 +181,115 @@ def _add_to_database_no_RAM(forecast_files: list[str]):
     conn.close()
 
 def add_to_database(forecast_files: list[str]):
-    """
-    Processes a list of forecast files by adding their data into an in-memory database.
-    When the cumulative size of the files read exceeds 25% of system RAM, the in-memory data
-    is dumped into the on-disk database and the in-memory table is cleared.
-    """
-    # Ensure on-disk database exists and retrieve its schema
     create_database_if_dont_exist()
 
-    if PCT_MEM_USAGE == 0: # If told to do 0 percent, then just dump straight to disk
+    if PCT_MEM_USAGE == 0:
         _add_to_database_no_RAM(forecast_files)
         return
-    
+
+    if not os.path.exists(DB_PATH):
+        raise FileNotFoundError(f"❌ Database file not found at {DB_PATH}")
+
     disk_conn = sqlite3.connect(DB_PATH)
     disk_cursor = disk_conn.cursor()
+
+    # Get table schema from disk DB
     disk_cursor.execute(f"SELECT sql FROM sqlite_master WHERE type='table' AND name=?", (TABLE_NAME,))
     table_ddl_row = disk_cursor.fetchone()
     if table_ddl_row is None:
         disk_conn.close()
-        raise RuntimeError("Table not found in disk database.")
+        raise RuntimeError(f"❌ Table '{TABLE_NAME}' not found in disk database. Ensure it is created.")
+
     table_ddl = table_ddl_row[0]
+    if "IF NOT EXISTS" not in table_ddl:
+        table_ddl = table_ddl.replace("CREATE TABLE", "CREATE TABLE IF NOT EXISTS")
+
     disk_conn.close()
-    
-    # Create an in-memory database with the same schema
+
+    # Create in-memory database
     mem_conn = sqlite3.connect(":memory:")
     mem_cursor = mem_conn.cursor()
     mem_cursor.execute(table_ddl)
     mem_conn.commit()
-    
-    # Define threshold as 25% of system RAM (in bytes)
+
+    # Set SQLite memory limits
+    mem_cursor.execute("PRAGMA cache_size = -102400;")  # Limit cache to ~100MB
+    mem_cursor.execute("PRAGMA temp_store = MEMORY;")  # Store temp data in RAM
+
     total_ram = psutil.virtual_memory().total
     threshold = total_ram * PCT_MEM_USAGE
     accumulated_bytes = 0
-    
+
     len_files = len(forecast_files)
     for i, file in enumerate(forecast_files):
         file_size = os.path.getsize(file)
         accumulated_bytes += file_size
-        
+
         pct = 100 * (i + 1) / len_files
         print(f"Processing {pct:.2f}%: {file}")
+
         _add_to_database(file, mem_conn)
-        
+
+        # Ensure the table now exists
+        mem_cursor.execute(f"SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?", (TABLE_NAME,))
+        if mem_cursor.fetchone()[0] == 0:
+            raise RuntimeError(f"❌ Table '{TABLE_NAME}' does not exist in memory after adding data.")
+
+        # Get actual memory usage (SQLite + Python process)
+        cursor_mem = mem_conn.cursor()
+        cursor_mem.execute("PRAGMA memory_used;")
+        sqlite_mem_used = cursor_mem.fetchone()[0] if cursor_mem.fetchone() else 0
+        cursor_mem.close()
+
+        process = psutil.Process()
+        python_memory = process.memory_info().rss  # Resident Set Size in bytes
+
+        # Use the larger value
+        accumulated_bytes = max(accumulated_bytes, sqlite_mem_used, python_memory)
+
         if accumulated_bytes >= threshold:
             accumulated_mb = accumulated_bytes / (1024 * 1024)
-            print(f"Accumulated file size exceeds threshold. Dumping in-memory data to disk... (Transferring {accumulated_mb:.2f} MB in total)")
+            print(f"Dumping in-memory data to disk... ({accumulated_mb:.2f} MB)")
+            
             mem_cursor.execute("ATTACH DATABASE ? AS disk", (DB_PATH,))
             mem_cursor.execute(f"""
-                INSERT OR IGNORE INTO disk.{TABLE_NAME}
+                INSERT OR REPLACE INTO disk.{TABLE_NAME}
                 SELECT * FROM main.{TABLE_NAME}
             """)
             mem_conn.commit()
             mem_cursor.execute("DETACH DATABASE disk")
-            mem_cursor.execute(f"DELETE FROM {TABLE_NAME}")
+
+            # Free memory using a temporary table swap
+            mem_cursor.execute(f"""
+                CREATE TEMP TABLE temp_{TABLE_NAME} AS SELECT * FROM {TABLE_NAME} WHERE 1=0;
+            """)
+            mem_cursor.execute(f"DROP TABLE {TABLE_NAME}")
+            mem_cursor.execute(f"ALTER TABLE temp_{TABLE_NAME} RENAME TO {TABLE_NAME}")
             mem_conn.commit()
-            accumulated_bytes = 0  # Reset counter after dump
-    
-    # Final dump for any remaining in-memory data
+
+            accumulated_bytes = 0  
+
+    # Final flush
     mem_cursor.execute(f"SELECT COUNT(*) FROM {TABLE_NAME}")
     count_remaining = mem_cursor.fetchone()[0]
     if count_remaining > 0:
-        accumulated_mb = accumulated_bytes / (1024 * 1024)
-        print(f"Dumping remaining in-memory data to disk... (Transferring {accumulated_mb:.2f} MB in total)")
+        print(f"Final dump to disk...")
+
         mem_cursor.execute("ATTACH DATABASE ? AS disk", (DB_PATH,))
         mem_cursor.execute(f"""
-            INSERT OR IGNORE INTO disk.{TABLE_NAME}
+            INSERT OR REPLACE INTO disk.{TABLE_NAME}
             SELECT * FROM main.{TABLE_NAME}
         """)
         mem_conn.commit()
         mem_cursor.execute("DETACH DATABASE disk")
-    
+
     mem_conn.close()
 
 
 
-def get_nearest_station_dt_data(dt: datetime.datetime, lat_min, lat_max, lon_min, lon_max, timedelta = pd.Timedelta(days=1), unique=True, _tries=0) -> pd.DataFrame:
 
+def get_nearest_station_dt_data(dt: datetime.datetime, lat_min, lat_max, lon_min, lon_max, timedelta = pd.Timedelta(days=1), unique=True, _tries=0) -> pd.DataFrame:
+  print(f"Attempting to get weather data. This may take a few minutes depending on database size. (past tries: {_tries})")
   exhausted_takes = not (_tries < 2)
   if exhausted_takes:
       print("Multiple tries exceeded with getting forecast data. Returning what is possible.")
@@ -265,8 +299,8 @@ def get_nearest_station_dt_data(dt: datetime.datetime, lat_min, lat_max, lon_min
   if len(resultant_db_data) == 0 and not exhausted_takes:
       print("No data found in database... Adding")
 
-      forecast_files = forecast_downloader.download_psv_files(dt.year, lat_min, lat_max, lon_min, lon_max, month=dt.month, day=dt.day, save_dir=FORECAST_DIR, force_download=(not USE_CACHE))
-
+      forecast_files = forecast_downloader.download_psv_files(dt.year, lat_min, lat_max, lon_min, lon_max, month=dt.month, day=dt.day, save_dir=FORECAST_DIR, force_download=(not USE_CACHE), validate=VALIDATE_DATA)
+      print("Files found:", forecast_files)
       add_to_database(forecast_files)
       return get_nearest_station_dt_data(dt, lat_min, lat_max, lon_min, lon_max, timedelta, unique, _tries + 1)
   

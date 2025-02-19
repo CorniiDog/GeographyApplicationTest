@@ -34,6 +34,9 @@ os.makedirs(dir_to_use, exist_ok=True)
 
 forecast_database.DB_PATH = os.path.join(dir_to_use, "forecasts.db")
 forecast_database.FORECAST_DIR = os.path.join(dir_to_use, "forecasts")
+forecast_database.USE_CACHE = True
+forecast_database.VALIDATE_DATA = True # Enable to True for quick validation of incoming data
+
 
 # Find bounding box of a state
 state_of_interest = "Texas"
@@ -115,17 +118,18 @@ middle_lon = np.average([lon_max, lon_min])
 middle_lat = np.average([lat_max, lat_min])
 
 
-bbox_width = np.abs(lon_max - lon_min)
-bbox_height = np.abs(lat_min - lat_max)
-buffer_width = bbox_width * cities_border_buffer_pct
-buffer_height = bbox_height  * cities_border_buffer_pct
-
 ############################## TODO: Delete
-now = datetime.datetime.now()
+now = datetime.datetime.now() - datetime.timedelta(days=365)
 datetimes = [now - datetime.timedelta(days=365 * i) for i in range(21)][::-1]  # -20 years to 0
 for hist_dt in datetimes:
     weater_data = forecast_database.get_nearest_station_dt_data(hist_dt, lat_min, lat_max, lon_min, lon_max, timedelta=buffer_time, unique=True)
 
+
+
+bbox_width = np.abs(lon_max - lon_min)
+bbox_height = np.abs(lat_min - lat_max)
+buffer_width = bbox_width * cities_border_buffer_pct
+buffer_height = bbox_height  * cities_border_buffer_pct
 
 def is_recent(dt, days=120):
     return dt >= datetime.datetime.now() - datetime.timedelta(days=days)
