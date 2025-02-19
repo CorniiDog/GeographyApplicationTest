@@ -258,6 +258,9 @@ def add_to_database(forecast_files: list[str]):
             mem_conn.commit()
 
             accumulated_bytes = 0  
+        
+        pct_accumulated = 100 * accumulated_bytes / threshold
+        print(f"In-Memory DB Size: {accumulated_bytes / (1024*1024):.2f} MB ({pct_accumulated:.2f}% of allocated memory)")
 
     # Final dump
     mem_cursor.execute(f"SELECT COUNT(*) FROM {TABLE_NAME}")

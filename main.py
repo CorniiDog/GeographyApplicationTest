@@ -32,7 +32,7 @@ dir_to_use = "D:\\LightningParser"
 
 os.makedirs(dir_to_use, exist_ok=True)
 
-forecast_database.DB_PATH = os.path.join(dir_to_use, "forecasts.db")
+forecast_database.DB_PATH = "forecasts.db"
 forecast_database.FORECAST_DIR = os.path.join(dir_to_use, "forecasts")
 forecast_database.USE_CACHE = True
 forecast_database.VALIDATE_DATA = True # Enable to True for quick validation of incoming data
