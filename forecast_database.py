@@ -224,7 +224,7 @@ def add_to_database(forecast_files: list[str]):
         
         if accumulated_bytes >= threshold:
             accumulated_mb = accumulated_bytes / (1024 * 1024)
-            print(f"Accumulated file size exceeds threshold. Dumping in-memory data to disk... (Transferring {accumulated_mb} MB in total)")
+            print(f"Accumulated file size exceeds threshold. Dumping in-memory data to disk... (Transferring {accumulated_mb:.2f} MB in total)")
             mem_cursor.execute("ATTACH DATABASE ? AS disk", (DB_PATH,))
             mem_cursor.execute(f"""
                 INSERT OR IGNORE INTO disk.{TABLE_NAME}
@@ -241,7 +241,7 @@ def add_to_database(forecast_files: list[str]):
     count_remaining = mem_cursor.fetchone()[0]
     if count_remaining > 0:
         accumulated_mb = accumulated_bytes / (1024 * 1024)
-        print(f"Dumping remaining in-memory data to disk... (Transferring {accumulated_mb} MB in total)")
+        print(f"Dumping remaining in-memory data to disk... (Transferring {accumulated_mb:.2f} MB in total)")
         mem_cursor.execute("ATTACH DATABASE ? AS disk", (DB_PATH,))
         mem_cursor.execute(f"""
             INSERT OR IGNORE INTO disk.{TABLE_NAME}
