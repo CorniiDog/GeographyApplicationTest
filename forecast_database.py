@@ -188,22 +188,27 @@ def add_to_database(forecast_files: list[str]):
         return
 
     if not os.path.exists(DB_PATH):
-        raise FileNotFoundError(f"❌ Database file not found at {DB_PATH}")
+        print("Disk database missing. Recreating...")
+        create_database_if_dont_exist()
 
     disk_conn = sqlite3.connect(DB_PATH)
     disk_cursor = disk_conn.cursor()
 
-    # Get table schema from disk DB
+    # Get table schema, recreate if missing
     disk_cursor.execute(f"SELECT sql FROM sqlite_master WHERE type='table' AND name=?", (TABLE_NAME,))
     table_ddl_row = disk_cursor.fetchone()
+    
     if table_ddl_row is None:
-        disk_conn.close()
-        raise RuntimeError(f"❌ Table '{TABLE_NAME}' not found in disk database. Ensure it is created.")
+        print(f"Table '{TABLE_NAME}' missing. Recreating in disk DB...")
+        create_database_if_dont_exist()
+        disk_conn = sqlite3.connect(DB_PATH)
+        disk_cursor = disk_conn.cursor()
+        disk_cursor.execute(f"SELECT sql FROM sqlite_master WHERE type='table' AND name=?", (TABLE_NAME,))
+        table_ddl_row = disk_cursor.fetchone()
+        if table_ddl_row is None:
+            raise RuntimeError(f"Failed to recreate table '{TABLE_NAME}'.")
 
     table_ddl = table_ddl_row[0]
-    if "IF NOT EXISTS" not in table_ddl:
-        table_ddl = table_ddl.replace("CREATE TABLE", "CREATE TABLE IF NOT EXISTS")
-
     disk_conn.close()
 
     # Create in-memory database
@@ -212,9 +217,9 @@ def add_to_database(forecast_files: list[str]):
     mem_cursor.execute(table_ddl)
     mem_conn.commit()
 
-    # Set SQLite memory limits
+    # SQLite memory limits
     mem_cursor.execute("PRAGMA cache_size = -102400;")  # Limit cache to ~100MB
-    mem_cursor.execute("PRAGMA temp_store = MEMORY;")  # Store temp data in RAM
+    mem_cursor.execute("PRAGMA temp_store = MEMORY;")  # Use RAM
 
     total_ram = psutil.virtual_memory().total
     threshold = total_ram * PCT_MEM_USAGE
@@ -230,60 +235,42 @@ def add_to_database(forecast_files: list[str]):
 
         _add_to_database(file, mem_conn)
 
-        # Ensure the table now exists
-        mem_cursor.execute(f"SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?", (TABLE_NAME,))
-        if mem_cursor.fetchone()[0] == 0:
-            raise RuntimeError(f"❌ Table '{TABLE_NAME}' does not exist in memory after adding data.")
-
-        # Get actual memory usage (SQLite + Python process)
+        # Check memory usage
         cursor_mem = mem_conn.cursor()
         cursor_mem.execute("PRAGMA memory_used;")
-        sqlite_mem_used = cursor_mem.fetchone()[0] if cursor_mem.fetchone() else 0
+        result = cursor_mem.fetchone()
+        sqlite_mem_used = result[0] if result is not None else 0
         cursor_mem.close()
 
-        process = psutil.Process()
-        python_memory = process.memory_info().rss  # Resident Set Size in bytes
-
-        # Use the larger value
-        accumulated_bytes = max(accumulated_bytes, sqlite_mem_used, python_memory)
+        accumulated_bytes = max(accumulated_bytes, sqlite_mem_used)
 
         if accumulated_bytes >= threshold:
-            accumulated_mb = accumulated_bytes / (1024 * 1024)
-            print(f"Dumping in-memory data to disk... ({accumulated_mb:.2f} MB)")
-            
+            print(f"Dumping {accumulated_bytes / (1024*1024):.2f} MB to disk...")
+
             mem_cursor.execute("ATTACH DATABASE ? AS disk", (DB_PATH,))
-            mem_cursor.execute(f"""
-                INSERT OR REPLACE INTO disk.{TABLE_NAME}
-                SELECT * FROM main.{TABLE_NAME}
-            """)
+            mem_cursor.execute(f"INSERT OR REPLACE INTO disk.{TABLE_NAME} SELECT * FROM main.{TABLE_NAME}")
             mem_conn.commit()
             mem_cursor.execute("DETACH DATABASE disk")
 
-            # Free memory using a temporary table swap
-            mem_cursor.execute(f"""
-                CREATE TEMP TABLE temp_{TABLE_NAME} AS SELECT * FROM {TABLE_NAME} WHERE 1=0;
-            """)
-            mem_cursor.execute(f"DROP TABLE {TABLE_NAME}")
-            mem_cursor.execute(f"ALTER TABLE temp_{TABLE_NAME} RENAME TO {TABLE_NAME}")
+            # Clear memory by recreating the table
+            mem_cursor.execute(f"DROP TABLE IF EXISTS {TABLE_NAME}")
+            mem_cursor.execute(table_ddl)
             mem_conn.commit()
 
             accumulated_bytes = 0  
 
-    # Final flush
+    # Final dump
     mem_cursor.execute(f"SELECT COUNT(*) FROM {TABLE_NAME}")
     count_remaining = mem_cursor.fetchone()[0]
     if count_remaining > 0:
-        print(f"Final dump to disk...")
-
+        print(f"Final dump to disk with {count_remaining} records...")
         mem_cursor.execute("ATTACH DATABASE ? AS disk", (DB_PATH,))
-        mem_cursor.execute(f"""
-            INSERT OR REPLACE INTO disk.{TABLE_NAME}
-            SELECT * FROM main.{TABLE_NAME}
-        """)
+        mem_cursor.execute(f"INSERT OR REPLACE INTO disk.{TABLE_NAME} SELECT * FROM main.{TABLE_NAME}")
         mem_conn.commit()
         mem_cursor.execute("DETACH DATABASE disk")
 
     mem_conn.close()
+
 
 
 
