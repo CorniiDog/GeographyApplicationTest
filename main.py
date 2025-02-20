@@ -4,8 +4,20 @@
 # pip install -r requirements.txt
 # Documentation: https://blaylockbk.github.io/goes2go/_build/html/
 
-# To list hard drives in Ubuntu:
-# 
+# To allow vpn service:
+# sudo nano /etc/openvpn/server.conf 
+# or nano /etc/openvpn/client/airvpn.conf
+#
+# Add at bottom of the config for the openvpn service:
+"""
+route nwws-oi-cprk.weather.gov 255.255.255.255 net_gateway
+route api.weather.gov 255.255.255.255 net_gateway
+route www.ncdc.noaa.gov 255.255.255.255 net_gateway
+route tgftp.nws.noaa.gov 255.255.255.255 net_gateway
+route nomads.ncep.noaa.gov 255.255.255.255 net_gateway
+route www.noaa.gov 255.255.255.255 net_gateway
+route ocean.weather.gov 255.255.255.255 net_gateway
+"""
 
 import matplotlib.pyplot as plt
 import pandas as pd

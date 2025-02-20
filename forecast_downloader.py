@@ -199,7 +199,7 @@ def download_psv_files(year:int, lat_min:float, lat_max:float, lon_min:float, lo
             try:
                 print(f"Contacting {url}")
                 response = requests.get(url, timeout=20)
-                if response.status_code == 200:
+                if response.status_code == 200 and len(response.content) > 10:
                     print("Response received. Downloading...")
                     with open(file_path, "wb") as f:
                         f.write(response.content)
