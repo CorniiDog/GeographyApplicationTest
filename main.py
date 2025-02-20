@@ -4,6 +4,9 @@
 # pip install -r requirements.txt
 # Documentation: https://blaylockbk.github.io/goes2go/_build/html/
 
+# To list hard drives in Ubuntu:
+# 
+
 import matplotlib.pyplot as plt
 import pandas as pd
 import numpy as np
@@ -28,7 +31,7 @@ import os
 
 import forecast_database
 
-dir_to_use = "D:\\LightningParser"
+dir_to_use = "/mnt/LightDir"
 
 os.makedirs(dir_to_use, exist_ok=True)
 
