@@ -19,6 +19,29 @@ route www.noaa.gov 255.255.255.255 net_gateway
 route ocean.weather.gov 255.255.255.255 net_gateway
 """
 
+# To run this in background so that it works while the ssh session is terminated:
+# ---
+#
+# python main.py > output.log 2>&1 & disown
+
+# To see storage in current dir:
+# ---
+#
+# sudo apt install exa -y
+# exa -la --icons
+
+# To view running processes easily:
+# ---
+#
+# sudo apt install htop
+# htop
+
+# alternative way to view running processes easily:
+# ---
+#
+# sudo apt install btop
+# btop
+
 import matplotlib.pyplot as plt
 import pandas as pd
 import numpy as np
