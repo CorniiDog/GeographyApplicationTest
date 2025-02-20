@@ -17,6 +17,8 @@ route tgftp.nws.noaa.gov 255.255.255.255 net_gateway
 route nomads.ncep.noaa.gov 255.255.255.255 net_gateway
 route www.noaa.gov 255.255.255.255 net_gateway
 route ocean.weather.gov 255.255.255.255 net_gateway
+route naturalearth.s3.amazonaws.com 255.255.255.255 net_gateway
+route amazonaws.com 255.255.255.255 net_gateway
 """
 
 # To run this in background so that it works while the ssh session is terminated:
@@ -86,7 +88,7 @@ state_type = "state"
 # 'C': Contiguous United States (alias 'CONUS')
 # 'F': Full Disk (alias 'FULL')
 # 'M': Mesoscale (alias 'MESOSCALE')
-satellite_domain = 'F' 
+satellite_domain = 'C' 
 
 latlon_additional_buffer = 0.1
 
@@ -101,9 +103,9 @@ buffer_time = pd.Timedelta(minutes=10)
 
 show_state_outlines = True
 show_roads = True
-show_wind = False
+show_wind = True
 show_city_names = True
-show_weather_stations = True
+show_weather_stations = False
 
 news_header = 'temperature'
 
@@ -156,12 +158,12 @@ middle_lon = np.average([lon_max, lon_min])
 middle_lat = np.average([lat_max, lat_min])
 
 
-############################## TODO: Delete
-now = datetime.datetime.now() - datetime.timedelta(days=365)
-datetimes = [now - datetime.timedelta(days=365 * i) for i in range(21)][::-1]  # -20 years to 0
-for hist_dt in datetimes:
-    weater_data = forecast_database.get_nearest_station_dt_data(hist_dt, lat_min, lat_max, lon_min, lon_max, timedelta=buffer_time, unique=True)
-
+############################## TODO: Delete 
+# now = datetime.datetime.now() - datetime.timedelta(days=365)
+# datetimes = [now - datetime.timedelta(days=365 * i) for i in range(21)][::-1]  # -20 years to 0
+# for hist_dt in datetimes:
+#     weater_data = forecast_database.get_nearest_station_dt_data(hist_dt, lat_min, lat_max, lon_min, lon_max, timedelta=buffer_time, unique=True)
+##############################
 
 
 bbox_width = np.abs(lon_max - lon_min)
@@ -223,7 +225,8 @@ text.set_path_effects([
 
 # 3. Load city data and add city labels
 if show_city_names:
-    cities = gpd.read_file('populated_places\\ne_10m_populated_places.shp')
+    cities_file = os.path.join("populated_places", "ne_10m_populated_places.shp")
+    cities = gpd.read_file(cities_file)
 
     # Create a GeoDataFrame row for Houston
     houston = gpd.GeoDataFrame({
