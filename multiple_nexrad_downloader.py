@@ -37,6 +37,7 @@ for line in lines[3:]:
 # Define bounding box and target datetime
 lon_min, lat_min, lon_max, lat_max = -106.647, 25.840, -93.517, 36.500
 dt = datetime.datetime(2022, 2, 1, 8, 55, 2)
+show_stations = False
 
 # Filter stations within the bounding box
 filtered_sites = []
@@ -68,6 +69,7 @@ grid_lon2d, grid_lat2d = np.meshgrid(grid_lon, grid_lat)
 combined_ref = np.full(grid_lon2d.shape, np.nan)
 combined_rel = np.full(grid_lon2d.shape, np.inf)  # lower distance is more reliable
 
+processed_station_data = []
 # Loop over each station, regrid its data, and update the master grid using reliability
 for station in filtered_sites:
     icao = station['ICAO']
@@ -172,11 +174,21 @@ for station in filtered_sites:
     update_mask = valid_mask & (interp_rel < combined_rel)
     combined_ref[update_mask] = interp_ref[update_mask]
     combined_rel[update_mask] = interp_rel[update_mask]
+    
+    processed_station_data.append([station_lon, station_lat, icao])
+
 
 # Create geographic plot using the combined grid
 fig, ax = plt.subplots(1, 1, figsize=(12, 8), subplot_kw={'projection': ccrs.PlateCarree()})
 mesh = ax.pcolormesh(grid_lon2d, grid_lat2d, combined_ref, cmap=ref_cmap, norm=ref_norm,
                      shading='auto', transform=ccrs.PlateCarree(), alpha=0.8)
+
+if show_stations:
+  for station in processed_station_data:
+      station_lon, station_lat, icao = station
+      ax.plot(station_lon, station_lat, marker='o', color='blue', markersize=5, transform=ccrs.PlateCarree())
+      ax.text(station_lon, station_lat, icao, fontsize=8, transform=ccrs.PlateCarree(),
+              verticalalignment='bottom', color='blue')
 
 # Add map features and gridlines
 ax.add_feature(cfeature.BORDERS, linestyle=":", edgecolor="black")
