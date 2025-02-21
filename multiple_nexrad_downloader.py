@@ -8,9 +8,9 @@ import cartopy.feature as cfeature
 import matplotlib.pyplot as plt
 import numpy as np
 from metpy.io import Level2File
-from metpy.plots import add_timestamp, ctables
+from metpy.plots import ctables
 from pyproj import Proj
-
+from scipy.interpolate import griddata
 
 # AWS S3 bucket configuration
 BUCKET_NAME = "noaa-nexrad-level2"
@@ -60,10 +60,15 @@ bucket = s3_resource.Bucket(BUCKET_NAME)
 # Get reflectivity colortable from MetPy
 ref_norm, ref_cmap = ctables.registry.get_with_steps('NWSReflectivity', 5, 5)
 
-# Create a single geographic plot
-fig, ax = plt.subplots(1, 1, figsize=(12, 8), subplot_kw={'projection': ccrs.PlateCarree()})
+# Create a master grid covering the bounding box
+grid_res = 0.01  # degrees; adjust resolution as needed
+grid_lon = np.arange(lon_min, lon_max, grid_res)
+grid_lat = np.arange(lat_min, lat_max, grid_res)
+grid_lon2d, grid_lat2d = np.meshgrid(grid_lon, grid_lat)
+combined_ref = np.full(grid_lon2d.shape, np.nan)
+combined_rel = np.full(grid_lon2d.shape, np.inf)  # lower distance is more reliable
 
-# Loop over each station and overlay its radar data
+# Loop over each station, regrid its data, and update the master grid using reliability
 for station in filtered_sites:
     icao = station['ICAO']
     try:
@@ -122,38 +127,56 @@ for station in filtered_sites:
         print(f"Error extracting reflectivity from {obj.key}: {e}")
         continue
 
-    # Define a station-specific projection (polar coordinates are relative to the station)
+    # Skip if no valid data in this sweep
+    if ref_data.size == 0 or np.all(np.isnan(ref_data)):
+        continue
+    
+    print(f"Adding to data: {obj.key}")
+
+    # Define a station-specific projection (polar coordinates relative to station)
     proj_station = Proj(proj="aeqd", datum="WGS84", lat_0=station_lat, lon_0=station_lon)
     # Convert polar (range, azimuth) to x,y coordinates (in km)
     xlocs = ref_range * np.sin(np.deg2rad(az[:, np.newaxis]))
     ylocs = ref_range * np.cos(np.deg2rad(az[:, np.newaxis]))
 
-    # Dynamically adjust shapes if necessary
+    # Adjust shapes if necessary
     x_diff = xlocs.shape[1] - ref_data.shape[1]
-    y_diff = ylocs.shape[1] - ref_data.shape[1]
-    data_diff = ref_data.shape[1] - xlocs.shape[1]
     if x_diff > 0:
         xlocs = xlocs[:, :-x_diff]
-    if y_diff > 0:
-        ylocs = ylocs[:, :-y_diff]
+    data_diff = ref_data.shape[1] - xlocs.shape[1]
     if data_diff > 0:
         ref_data = ref_data[:, :-data_diff]
 
     # Convert x,y (km) to geographic coordinates (lat/lon)
     lon_locs, lat_locs = proj_station(xlocs * 1000, ylocs * 1000, inverse=True)
-
-    # Apply the bounding box filter
+    # Apply the bounding box filter for this station's grid
     mask = (lon_locs < lon_min) | (lon_locs > lon_max) | (lat_locs < lat_min) | (lat_locs > lat_max)
     ref_data = np.ma.masked_where(mask, ref_data)
+    if np.all(ref_data.mask):
+        continue
 
-    # Overlay this station's reflectivity using a semi-transparent pcolormesh
-    a = ax.pcolormesh(lon_locs, lat_locs, ref_data, cmap=ref_cmap, norm=ref_norm,
-                      shading='auto', transform=ccrs.PlateCarree(), alpha=0.5)
+    # Compute a reliability metric: distance from the radar station (km)
+    reliability = np.sqrt(xlocs**2 + ylocs**2)
+    
+    # Flatten the station arrays for interpolation
+    points = np.column_stack((lon_locs.flatten(), lat_locs.flatten()))
+    ref_flat = ref_data.flatten()
+    rel_flat = reliability.flatten()
 
-    # Mark the station's location and label it
-    ax.plot(station_lon, station_lat, marker='o', color='blue', markersize=5, transform=ccrs.PlateCarree())
-    ax.text(station_lon, station_lat, icao, fontsize=8, transform=ccrs.PlateCarree(),
-            verticalalignment='bottom', color='blue')
+    # Interpolate radar data and reliability onto the master grid
+    interp_ref = griddata(points, ref_flat, (grid_lon2d, grid_lat2d), method='linear')
+    interp_rel = griddata(points, rel_flat, (grid_lon2d, grid_lat2d), method='linear')
+    
+    # Where new data is available and has a better (lower) reliability value, update the master grid
+    valid_mask = ~np.isnan(interp_rel)
+    update_mask = valid_mask & (interp_rel < combined_rel)
+    combined_ref[update_mask] = interp_ref[update_mask]
+    combined_rel[update_mask] = interp_rel[update_mask]
+
+# Create geographic plot using the combined grid
+fig, ax = plt.subplots(1, 1, figsize=(12, 8), subplot_kw={'projection': ccrs.PlateCarree()})
+mesh = ax.pcolormesh(grid_lon2d, grid_lat2d, combined_ref, cmap=ref_cmap, norm=ref_norm,
+                     shading='auto', transform=ccrs.PlateCarree(), alpha=0.8)
 
 # Add map features and gridlines
 ax.add_feature(cfeature.BORDERS, linestyle=":", edgecolor="black")
@@ -167,6 +190,7 @@ gl.ylabel_style = {'size': 10, 'color': 'black'}
 ax.set_xlim(lon_min, lon_max)
 ax.set_ylim(lat_min, lat_max)
 
-plt.suptitle("Radar Reflectivity from All Nexrad Stations", fontsize=20)
+plt.suptitle("Composite Radar Reflectivity from Overlapping Nexrad Stations", fontsize=20)
+plt.colorbar(mesh, ax=ax, label='Reflectivity (dBZ)')
 plt.tight_layout()
-plt.savefig('nexrad_multiple_sites.png', dpi=300, bbox_inches='tight')
+plt.savefig('nexrad_composite.png', dpi=300, bbox_inches='tight')
