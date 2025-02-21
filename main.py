@@ -44,6 +44,11 @@ route amazonaws.com 255.255.255.255 net_gateway
 # sudo apt install btop
 # btop
 
+# Other holdings for the future:
+# https://www.ncei.noaa.gov/access/homr/
+
+# https://www.ncei.noaa.gov/access/homr/file/nexrad-stations.txt
+
 import matplotlib.pyplot as plt
 import pandas as pd
 import numpy as np
@@ -96,7 +101,8 @@ latlon_additional_buffer = 0.1
 # Load GOES-16 data
 #dt = datetime.datetime(2020, 11, 16, 18, 0, 0)
 #dt = datetime.datetime(2021,2, 1, 8, 55) # 2021 winter storm
-dt = datetime.datetime(2022,2, 1, 8, 55)
+#dt = datetime.datetime(2022,2, 1, 8, 55)
+dt = datetime.datetime(2004,12, 1, 8, 55)
 #dt = datetime.datetime(2024, 12, 29, 18, 0) # 2024 storm
 #dt = datetime.datetime.now()
 
@@ -106,7 +112,7 @@ show_state_outlines = True
 show_roads = True
 show_wind = True
 show_city_names = True
-show_weather_stations = False
+show_weather_stations = True
 
 news_header = 'temperature'
 
@@ -115,7 +121,7 @@ news_header = 'temperature'
 # Other recipes: AirMass Ash DayCloudConvection DayCloudPhase DayConvection DayLandCloud DayLandCloudFire
 # DaySnowFog DifferentialWaterVapor Dust FireTemperature NaturalColor NightFogDifference NighttimeMicrophysics
 # RocketPlume SulfurDioxide TrueColor WaterVapor
-rgb_recipe = 'WaterVapor'
+rgb_recipe = 'NaturalColor'
 cities_border_buffer_pct = 0.1
 pct_dark_to_consider_night = 0.8 # For 'DayNightCloudMicroCombo'
 

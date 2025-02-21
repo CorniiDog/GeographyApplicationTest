@@ -15,3 +15,4 @@ noaa-sdk
 netcdf4
 psutil
 arm-pyart
+boto3
