@@ -13,7 +13,7 @@ from multiprocessing import Pool, cpu_count, BoundedSemaphore
 
 # ----- User Configuration -----
 # Select parameter: 'REF', 'RHO', 'PHI', or 'ZDR'
-SELECTED_PARAM = 'RHO'  # Change as needed
+SELECTED_PARAM = 'ZDR'  # Change as needed
 
 # Get the NWS reflectivity colortable from MetPy (only called once)
 ref_norm, ref_cmap = ctables.registry.get_with_steps('NWSReflectivity', 5, 5)
@@ -186,9 +186,12 @@ def process_station(station, grid_lon2d, grid_lat2d):
     x_diff = xlocs.shape[1] - param_data.shape[1]
     if x_diff > 0:
         xlocs = xlocs[:, :-x_diff]
+        ylocs = ylocs[:, :-x_diff]  # Ensure ylocs is sliced similarly
+
     data_diff = param_data.shape[1] - xlocs.shape[1]
     if data_diff > 0:
         param_data = param_data[:, :-data_diff]
+
 
     lon_locs, lat_locs = proj_station(xlocs * 1000, ylocs * 1000, inverse=True)
     mask = (lon_locs < lon_min) | (lon_locs > lon_max) | (lat_locs < lat_min) | (lat_locs > lat_max)
