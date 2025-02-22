@@ -11,6 +11,37 @@ from metpy.plots import ctables
 from scipy.interpolate import griddata
 from multiprocessing import Pool, cpu_count, BoundedSemaphore
 
+# ----- User Configuration -----
+# Select parameter: 'REF', 'RHO', 'PHI', or 'ZDR'
+SELECTED_PARAM = 'RHO'  # Change as needed
+
+# Get the NWS reflectivity colortable from MetPy (only called once)
+ref_norm, ref_cmap = ctables.registry.get_with_steps('NWSReflectivity', 5, 5)
+
+# Determine plot colormap and normalization based on the selected parameter.
+if SELECTED_PARAM == 'REF':
+    plot_cmap = ref_cmap
+    plot_norm = ref_norm
+    plot_label = 'Reflectivity (dBZ)'
+elif SELECTED_PARAM == 'RHO':
+    plot_cmap = 'plasma'
+    plot_norm = None
+    plot_label = 'RHO'
+elif SELECTED_PARAM == 'ZDR':
+    plot_cmap = 'viridis'
+    plot_norm = None
+    plot_label = 'Differential Reflectivity (dB)'
+elif SELECTED_PARAM == 'PHI':
+    plot_cmap = 'viridis'
+    plot_norm = None
+    plot_label = 'Differential Phase (°)'
+else:
+    plot_cmap = ref_cmap
+    plot_norm = ref_norm
+    plot_label = SELECTED_PARAM
+
+plot_title = f"Composite Radar {plot_label} from Overlapping Nexrad Stations"
+
 # Global configuration and constants
 BUCKET_NAME = "noaa-nexrad-level2"
 NEXRAD_STATION_LIST_URL = "https://www.ncei.noaa.gov/access/homr/file/nexrad-stations.txt"
@@ -19,19 +50,16 @@ lon_min, lat_min, lon_max, lat_max = -106.647, 25.840, -93.517, 36.500
 show_stations = True
 
 # Option: set the percentage of available cores to use (e.g., 0.5 for 50%)
-CORE_PERCENTAGE = 0.5
+CORE_PERCENTAGE = 0.9
 num_processes = max(1, int(cpu_count() * CORE_PERCENTAGE))
 print(f"Using {num_processes} out of {cpu_count()} cores.")
-
-# Get reflectivity colortable from MetPy
-ref_norm, ref_cmap = ctables.registry.get_with_steps('NWSReflectivity', 5, 5)
 
 # Create master grid for composite plotting
 grid_res = 0.01  # degrees; adjust resolution as needed
 grid_lon = np.arange(lon_min, lon_max, grid_res)
 grid_lat = np.arange(lat_min, lat_max, grid_res)
 grid_lon2d, grid_lat2d = np.meshgrid(grid_lon, grid_lat)
-combined_ref = np.full(grid_lon2d.shape, np.nan)
+combined_param = np.full(grid_lon2d.shape, np.nan)
 combined_rel = np.full(grid_lon2d.shape, np.inf)  # lower value means higher reliability
 
 # Fetch the list of NEXRAD stations (single HTTP request)
@@ -69,16 +97,15 @@ if not filtered_sites:
 processed_station_data = []
 
 # Global semaphore to limit concurrent HTTP requests.
-# This shared semaphore will be passed to each worker.
 def init_pool(sem):
     global http_semaphore
     http_semaphore = sem
 
 def process_station(station, grid_lon2d, grid_lat2d):
     """
-    Processes a single station's radar data by retrieving and interpolating its reflectivity
-    onto the master grid. Uses a shared semaphore (http_semaphore) to limit HTTP requests.
-    Returns a tuple (interp_ref, interp_rel, station_lon, station_lat, icao) if successful, or None.
+    Processes a single station's radar data by retrieving and interpolating the
+    selected parameter onto the master grid. Returns a tuple
+    (interp_param, interp_rel, station_lon, station_lat, icao) if successful.
     """
     try:
         station_lat = float(station['LAT'])
@@ -93,7 +120,6 @@ def process_station(station, grid_lon2d, grid_lat2d):
     bucket = s3_resource.Bucket(BUCKET_NAME)
 
     prefix = f"{dt.year}/{dt.month:02d}/{dt.day:02d}/{icao}/"
-    # Limit the concurrent HTTP call using the shared semaphore
     with http_semaphore:
         response = s3_client.list_objects_v2(Bucket=BUCKET_NAME, Prefix=prefix)
     if "Contents" not in response:
@@ -120,7 +146,6 @@ def process_station(station, grid_lon2d, grid_lat2d):
 
     from metpy.io import Level2File
     try:
-        # Protect HTTP get call with semaphore.
         with http_semaphore:
             f = Level2File(obj.get()['Body'])
     except Exception as e:
@@ -137,68 +162,72 @@ def process_station(station, grid_lon2d, grid_lat2d):
         return None
 
     try:
-        ref_hdr = f.sweeps[sweep][0][4][b'REF'][0]
-        ref_range = np.arange(ref_hdr.num_gates) * ref_hdr.gate_width + ref_hdr.first_gate
-        ref_data = np.array([ray[4][b'REF'][1] for ray in f.sweeps[sweep]])
+        param_bytes = SELECTED_PARAM.encode('utf-8')
+        hdr = f.sweeps[sweep][0][4][param_bytes][0]
+        if SELECTED_PARAM == 'REF':
+            param_range = np.arange(hdr.num_gates) * hdr.gate_width + hdr.first_gate
+        else:
+            param_range = (np.arange(hdr.num_gates + 1) - 0.5) * hdr.gate_width + hdr.first_gate
+        param_data = np.array([ray[4][param_bytes][1] for ray in f.sweeps[sweep]])
     except Exception as e:
-        print(f"Error extracting reflectivity from {obj.key}: {e}")
+        print(f"Error extracting {SELECTED_PARAM} from {obj.key}: {e}")
         return None
 
-    if ref_data.size == 0 or np.all(np.isnan(ref_data)):
+    if param_data.size == 0 or np.all(np.isnan(param_data)):
         return None
 
-    print(f"Processing station attributes to data: {obj.key}")
+    print(f"Processing station {obj.key} for parameter {SELECTED_PARAM}")
 
     from pyproj import Proj
     proj_station = Proj(proj="aeqd", datum="WGS84", lat_0=station_lat, lon_0=station_lon)
-    xlocs = ref_range * np.sin(np.deg2rad(az[:, np.newaxis]))
-    ylocs = ref_range * np.cos(np.deg2rad(az[:, np.newaxis]))
+    xlocs = param_range * np.sin(np.deg2rad(az[:, np.newaxis]))
+    ylocs = param_range * np.cos(np.deg2rad(az[:, np.newaxis]))
 
-    x_diff = xlocs.shape[1] - ref_data.shape[1]
+    x_diff = xlocs.shape[1] - param_data.shape[1]
     if x_diff > 0:
         xlocs = xlocs[:, :-x_diff]
-    data_diff = ref_data.shape[1] - xlocs.shape[1]
+    data_diff = param_data.shape[1] - xlocs.shape[1]
     if data_diff > 0:
-        ref_data = ref_data[:, :-data_diff]
+        param_data = param_data[:, :-data_diff]
 
     lon_locs, lat_locs = proj_station(xlocs * 1000, ylocs * 1000, inverse=True)
     mask = (lon_locs < lon_min) | (lon_locs > lon_max) | (lat_locs < lat_min) | (lat_locs > lat_max)
-    ref_data = np.ma.masked_where(mask, ref_data)
-    if np.all(ref_data.mask):
+    param_data = np.ma.masked_where(mask, param_data)
+    if np.all(param_data.mask):
         return None
 
     reliability = np.sqrt(xlocs**2 + ylocs**2)
     points = np.column_stack((lon_locs.flatten(), lat_locs.flatten()))
-    ref_flat = ref_data.flatten()
+    param_flat = param_data.flatten()
     rel_flat = reliability.flatten()
 
-    interp_ref = griddata(points, ref_flat, (grid_lon2d, grid_lat2d), method='linear')
+    interp_param = griddata(points, param_flat, (grid_lon2d, grid_lat2d), method='linear')
     interp_rel = griddata(points, rel_flat, (grid_lon2d, grid_lat2d), method='linear')
 
-    return (interp_ref, interp_rel, station_lon, station_lat, icao)
+    return (interp_param, interp_rel, station_lon, station_lat, icao)
 
 if __name__ == '__main__':
-    # Create a semaphore to limit concurrent HTTP requests (e.g., allow 4 at a time)
+    # Create a semaphore to limit concurrent HTTP requests (allow 4 at a time)
     http_sem = BoundedSemaphore(4)
     args = [(station, grid_lon2d, grid_lat2d) for station in filtered_sites]
-    
+
     with Pool(num_processes, initializer=init_pool, initargs=(http_sem,)) as pool:
         results = pool.starmap(process_station, args)
 
     for res in results:
         if res is None:
             continue
-        interp_ref, interp_rel, station_lon, station_lat, icao = res
+        interp_param, interp_rel, station_lon, station_lat, icao = res
         valid_mask = ~np.isnan(interp_rel)
         update_mask = valid_mask & (interp_rel < combined_rel)
-        combined_ref[update_mask] = interp_ref[update_mask]
+        combined_param[update_mask] = interp_param[update_mask]
         combined_rel[update_mask] = interp_rel[update_mask]
         processed_station_data.append([station_lon, station_lat, icao])
         print(f"Added station {icao} at ({station_lon}, {station_lat})")
 
     # Create geographic plot using the combined grid
     fig, ax = plt.subplots(1, 1, figsize=(12, 8), subplot_kw={'projection': ccrs.PlateCarree()})
-    mesh = ax.pcolormesh(grid_lon2d, grid_lat2d, combined_ref, cmap=ref_cmap, norm=ref_norm,
+    mesh = ax.pcolormesh(grid_lon2d, grid_lat2d, combined_param, cmap=plot_cmap, norm=plot_norm,
                          shading='auto', transform=ccrs.PlateCarree(), alpha=0.8)
 
     if show_stations:
@@ -220,7 +249,7 @@ if __name__ == '__main__':
     ax.set_xlim(lon_min, lon_max)
     ax.set_ylim(lat_min, lat_max)
 
-    plt.suptitle("Composite Radar Reflectivity from Overlapping Nexrad Stations", fontsize=20)
-    plt.colorbar(mesh, ax=ax, label='Reflectivity (dBZ)')
+    plt.suptitle(plot_title, fontsize=20)
+    plt.colorbar(mesh, ax=ax, label=plot_label)
     plt.tight_layout()
     plt.savefig('nexrad_composite.png', dpi=300, bbox_inches='tight')
