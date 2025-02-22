@@ -16,3 +16,4 @@ netcdf4
 psutil
 arm-pyart
 boto3
+nexradaws

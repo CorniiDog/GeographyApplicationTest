@@ -10,10 +10,11 @@ import numpy as np
 from metpy.plots import ctables
 from scipy.interpolate import griddata
 from multiprocessing import Pool, cpu_count, BoundedSemaphore
+import util_toolbox
 
 # ----- User Configuration -----
 # Select parameter: 'REF', 'RHO', 'PHI', or 'ZDR'
-SELECTED_PARAM = 'ZDR'  # Change as needed
+SELECTED_PARAM = 'REF'  # Change as needed
 
 # Get the NWS reflectivity colortable from MetPy (only called once)
 ref_norm, ref_cmap = ctables.registry.get_with_steps('NWSReflectivity', 5, 5)
@@ -23,18 +24,22 @@ if SELECTED_PARAM == 'REF':
     plot_cmap = ref_cmap
     plot_norm = ref_norm
     plot_label = 'Reflectivity (dBZ)'
+    units = ' dBZ'
 elif SELECTED_PARAM == 'RHO':
     plot_cmap = 'plasma'
     plot_norm = None
     plot_label = 'RHO'
+    units = ''
 elif SELECTED_PARAM == 'ZDR':
     plot_cmap = 'viridis'
     plot_norm = None
     plot_label = 'Differential Reflectivity (dB)'
+    units = ' dB'
 elif SELECTED_PARAM == 'PHI':
     plot_cmap = 'viridis'
     plot_norm = None
     plot_label = 'Differential Phase (°)'
+    units = '°'
 else:
     plot_cmap = ref_cmap
     plot_norm = ref_norm
@@ -45,7 +50,7 @@ plot_title = f"Composite Radar {plot_label} from Overlapping Nexrad Stations"
 # Global configuration and constants
 BUCKET_NAME = "noaa-nexrad-level2"
 NEXRAD_STATION_LIST_URL = "https://www.ncei.noaa.gov/access/homr/file/nexrad-stations.txt"
-dt = datetime.datetime(2022, 2, 1, 8, 55, 2)
+dt = datetime.datetime(2007, 8, 27, 1, 35, 2)
 lon_min, lat_min, lon_max, lat_max = -106.647, 25.840, -93.517, 36.500
 show_stations = True
 
@@ -86,6 +91,7 @@ for site in radar_sites:
     try:
         lat, lon = float(site["LAT"]), float(site["LON"])
         if lat_min <= lat <= lat_max and lon_min <= lon <= lon_max:
+            print("Site Found:", site['ICAO'])
             filtered_sites.append(site)
     except ValueError:
         continue
@@ -100,6 +106,7 @@ processed_station_data = []
 def init_pool(sem):
     global http_semaphore
     http_semaphore = sem
+    
 
 def process_station(station, grid_lon2d, grid_lat2d):
     """
@@ -123,15 +130,18 @@ def process_station(station, grid_lon2d, grid_lat2d):
     with http_semaphore:
         response = s3_client.list_objects_v2(Bucket=BUCKET_NAME, Prefix=prefix)
     if "Contents" not in response:
+        print(f"No content from response for {prefix}")
         return None
-
+    
     available_files = []
+    #print(response.get("Contents", []))
     for obj in response.get("Contents", []):
         key = obj["Key"]
         parts = key.split("_")
         if len(parts) > 1 and parts[1].isdigit():
             available_files.append((key, int(parts[1])))
     if not available_files:
+        print(f"Cannot find any available files for {prefix}")
         return None
 
     target_time = int(f"{dt.hour:02d}{dt.minute:02d}{dt.second:02d}")
@@ -141,6 +151,7 @@ def process_station(station, grid_lon2d, grid_lat2d):
     with http_semaphore:
         objs = list(bucket.objects.filter(Prefix=closest_key))
     if not objs:
+        print(f"Cannot find objects for {obj.key}")
         return None
     obj = objs[0]
 
@@ -153,6 +164,7 @@ def process_station(station, grid_lon2d, grid_lat2d):
         return None
 
     if not f.sweeps or len(f.sweeps[0]) == 0:
+        print(f"Returning because of fsweeps for {obj.key}")
         return None
     sweep = 0
     try:
@@ -164,17 +176,32 @@ def process_station(station, grid_lon2d, grid_lat2d):
     try:
         param_bytes = SELECTED_PARAM.encode('utf-8')
         hdr = f.sweeps[sweep][0][4][param_bytes][0]
+        # if SELECTED_PARAM == 'ZDR':
+        #     print(dir(hdr))
+        #     print(repr(hdr))
+
+
         if SELECTED_PARAM == 'REF':
             param_range = np.arange(hdr.num_gates) * hdr.gate_width + hdr.first_gate
         else:
             param_range = (np.arange(hdr.num_gates + 1) - 0.5) * hdr.gate_width + hdr.first_gate
+        # Extract raw data
         param_data = np.array([ray[4][param_bytes][1] for ray in f.sweeps[sweep]])
+        
     except Exception as e:
         print(f"Error extracting {SELECTED_PARAM} from {obj.key}: {e}")
         return None
 
     if param_data.size == 0 or np.all(np.isnan(param_data)):
+        print(f"Missing data for {obj.key}")
         return None
+    
+    # Compute maximum value from this station's data (for outlier detection)
+    max_val = np.nanmax(param_data)
+    print(f"Station {obj.key} max {SELECTED_PARAM} value: {max_val:.2f}{units}")
+
+    data = param_data.flatten()
+    util_toolbox.text_box_plot(data)
 
     print(f"Processing station {obj.key} for parameter {SELECTED_PARAM}")
 
@@ -192,11 +219,11 @@ def process_station(station, grid_lon2d, grid_lat2d):
     if data_diff > 0:
         param_data = param_data[:, :-data_diff]
 
-
     lon_locs, lat_locs = proj_station(xlocs * 1000, ylocs * 1000, inverse=True)
     mask = (lon_locs < lon_min) | (lon_locs > lon_max) | (lat_locs < lat_min) | (lat_locs > lat_max)
     param_data = np.ma.masked_where(mask, param_data)
     if np.all(param_data.mask):
+        print(f"No data within lat-lon range for {obj.key}")
         return None
 
     reliability = np.sqrt(xlocs**2 + ylocs**2)
