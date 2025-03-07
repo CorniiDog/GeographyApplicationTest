@@ -19,6 +19,7 @@ route www.noaa.gov 255.255.255.255 net_gateway
 route ocean.weather.gov 255.255.255.255 net_gateway
 route naturalearth.s3.amazonaws.com 255.255.255.255 net_gateway
 route amazonaws.com 255.255.255.255 net_gateway
+route google.com 255.255.255.255 net_gateway
 """
 
 # To run this in background so that it works while the ssh session is terminated:
@@ -71,6 +72,7 @@ from rasterio.transform import rowcol
 import json
 import os
 import pyart
+import pytz
 
 import forecast_database
 
@@ -102,7 +104,7 @@ latlon_additional_buffer = 0.1
 #dt = datetime.datetime(2020, 11, 16, 18, 0, 0)
 #dt = datetime.datetime(2021,2, 1, 8, 55) # 2021 winter storm
 #dt = datetime.datetime(2022,2, 1, 8, 55)
-dt = datetime.datetime(2004,12, 1, 8, 55)
+dt = datetime.datetime(2004,12, 1, 8, 55, tzinfo=pytz.UTC)
 #dt = datetime.datetime(2024, 12, 29, 18, 0) # 2024 storm
 #dt = datetime.datetime.now()
 

@@ -146,7 +146,7 @@ for obj in bucket.objects.filter(Prefix=closest_key):
             ('REF (dBZ)', 'RHO', 'ZDR (dBZ)', 'PHI'),
             axes.flatten()):
         
-        # Convert data to masked array
+        # Remove invalid data
         data = np.ma.array(var_data)
         data[np.isnan(data)] = np.ma.masked
 

@@ -1,5 +1,6 @@
 import requests
 import datetime
+import tempfile
 import boto3
 from botocore import UNSIGNED
 from botocore.config import Config
@@ -11,6 +12,10 @@ from metpy.plots import ctables
 from scipy.interpolate import griddata
 from multiprocessing import Pool, cpu_count, BoundedSemaphore
 import util_toolbox
+import os
+import io
+import shutil
+import pytz
 
 # ----- User Configuration -----
 # Select parameter: 'REF', 'RHO', 'PHI', or 'ZDR'
@@ -50,7 +55,9 @@ plot_title = f"Composite Radar {plot_label} from Overlapping Nexrad Stations"
 # Global configuration and constants
 BUCKET_NAME = "noaa-nexrad-level2"
 NEXRAD_STATION_LIST_URL = "https://www.ncei.noaa.gov/access/homr/file/nexrad-stations.txt"
-dt = datetime.datetime(2007, 8, 27, 1, 35, 2)
+dt = datetime.datetime(2007, 8, 27, 1, 35, 2, tzinfo=pytz.UTC)
+
+year, month, day, hour, minute, second = 2007, 8, 27, 1, 35, 2
 lon_min, lat_min, lon_max, lat_max = -106.647, 25.840, -93.517, 36.500
 show_stations = True
 
@@ -106,7 +113,6 @@ processed_station_data = []
 def init_pool(sem):
     global http_semaphore
     http_semaphore = sem
-    
 
 def process_station(station, grid_lon2d, grid_lat2d):
     """
@@ -114,6 +120,11 @@ def process_station(station, grid_lon2d, grid_lat2d):
     selected parameter onto the master grid. Returns a tuple
     (interp_param, interp_rel, station_lon, station_lat, icao) if successful.
     """
+    import gzip
+    from io import BytesIO
+    from metpy.io import Level2File
+    import nexrad_gz_backup
+
     try:
         station_lat = float(station['LAT'])
         station_lon = float(station['LON'])
@@ -135,13 +146,22 @@ def process_station(station, grid_lon2d, grid_lat2d):
     
     available_files = []
     #print(response.get("Contents", []))
+
+    # 
+    # 🡆 TINY FIX: strip possible '.gz' from the second part before checking isdigit()
+    #
     for obj in response.get("Contents", []):
         key = obj["Key"]
         parts = key.split("_")
-        if len(parts) > 1 and parts[1].isdigit():
-            available_files.append((key, int(parts[1])))
+        if len(parts) > 1:
+            # Remove any trailing extension (like '.gz') from time part
+            # so that e.g. '152932.gz' -> '152932'
+            time_str = parts[1].split(".")[0]  # Splits on '.'; takes '152932' from '152932.gz'
+            if time_str.isdigit():
+                available_files.append((key, int(time_str)))
+
     if not available_files:
-        print(f"Cannot find any available files for {prefix}")
+        print(f"Cannot find any files for {prefix}")
         return None
 
     target_time = int(f"{dt.hour:02d}{dt.minute:02d}{dt.second:02d}")
@@ -151,59 +171,70 @@ def process_station(station, grid_lon2d, grid_lat2d):
     with http_semaphore:
         objs = list(bucket.objects.filter(Prefix=closest_key))
     if not objs:
-        print(f"Cannot find objects for {obj.key}")
+        print(f"Cannot find objects for {closest_key}")
         return None
+
     obj = objs[0]
 
-    from metpy.io import Level2File
     try:
         with http_semaphore:
-            f = Level2File(obj.get()['Body'])
+            # Check if ends with .gz -> decompress if needed
+            if closest_key.lower().endswith(".gz"):
+                url = f"https://noaa-nexrad-level2.s3.amazonaws.com/{closest_key}"
+                f = Level2File(nexrad_gz_backup.get_nexrad_gz_backup(dt, icao))
+            else:
+                file_obj = obj.get()['Body']  # Download data in memory
+                f = Level2File(file_obj)
+
     except Exception as e:
-        print(f"Error reading {obj.key}: {e}")
+        print(f"Error reading {icao}: {e}")
         return None
 
     if not f.sweeps or len(f.sweeps[0]) == 0:
-        print(f"Returning because of fsweeps for {obj.key}")
+        print(f"Returning because of empty sweeps for {icao}")
         return None
+    
     sweep = 0
     try:
         az = np.array([ray[0].az_angle for ray in f.sweeps[sweep]])
     except Exception as e:
-        print(f"Error extracting azimuth angles from {obj.key}: {e}")
+        print(f"Error extracting azimuth angles from {icao}: {e}")
         return None
-
+    
     try:
+        print("1")
         param_bytes = SELECTED_PARAM.encode('utf-8')
         hdr = f.sweeps[sweep][0][4][param_bytes][0]
-        # if SELECTED_PARAM == 'ZDR':
-        #     print(dir(hdr))
-        #     print(repr(hdr))
-
+        print("2")
 
         if SELECTED_PARAM == 'REF':
             param_range = np.arange(hdr.num_gates) * hdr.gate_width + hdr.first_gate
         else:
             param_range = (np.arange(hdr.num_gates + 1) - 0.5) * hdr.gate_width + hdr.first_gate
-        # Extract raw data
-        param_data = np.array([ray[4][param_bytes][1] for ray in f.sweeps[sweep]])
         
+        print(3)
+
+        param_data = np.array([ray[4][param_bytes][1] for ray in f.sweeps[sweep]])
+        print("HRMMM")
     except Exception as e:
-        print(f"Error extracting {SELECTED_PARAM} from {obj.key}: {e}")
+        print(f"Error extracting {SELECTED_PARAM} from {icao}: {e}")
         return None
 
     if param_data.size == 0 or np.all(np.isnan(param_data)):
-        print(f"Missing data for {obj.key}")
+        print(f"Missing data for {icao}")
         return None
-    
+    print(4)
+
     # Compute maximum value from this station's data (for outlier detection)
     max_val = np.nanmax(param_data)
-    print(f"Station {obj.key} max {SELECTED_PARAM} value: {max_val:.2f}{units}")
-
+    print(f"Station {icao} max {SELECTED_PARAM} value: {max_val:.2f}{units}")
+    
     data = param_data.flatten()
+    # Mask invalid data
     util_toolbox.text_box_plot(data)
+    print(5)
 
-    print(f"Processing station {obj.key} for parameter {SELECTED_PARAM}")
+    print(f"Processing station {icao} for parameter {SELECTED_PARAM}")
 
     from pyproj import Proj
     proj_station = Proj(proj="aeqd", datum="WGS84", lat_0=station_lat, lon_0=station_lon)
@@ -219,11 +250,13 @@ def process_station(station, grid_lon2d, grid_lat2d):
     if data_diff > 0:
         param_data = param_data[:, :-data_diff]
 
+    print(6)
+
     lon_locs, lat_locs = proj_station(xlocs * 1000, ylocs * 1000, inverse=True)
     mask = (lon_locs < lon_min) | (lon_locs > lon_max) | (lat_locs < lat_min) | (lat_locs > lat_max)
     param_data = np.ma.masked_where(mask, param_data)
     if np.all(param_data.mask):
-        print(f"No data within lat-lon range for {obj.key}")
+        print(f"No data within lat-lon range for {icao}")
         return None
 
     reliability = np.sqrt(xlocs**2 + ylocs**2)

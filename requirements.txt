@@ -17,3 +17,4 @@ psutil
 arm-pyart
 boto3
 nexradaws
+siphon

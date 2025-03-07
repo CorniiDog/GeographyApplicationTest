@@ -1,93 +1,97 @@
-import requests
-import datetime
-import boto3
-from botocore import UNSIGNED
-from botocore.config import Config
+from siphon.radarserver import RadarServer
+from datetime import datetime, timedelta
+import numpy as np
+import metpy.plots as mpplots
+import matplotlib.pyplot as plt
 import cartopy.crs as ccrs
 import cartopy.feature as cfeature
-import matplotlib.pyplot as plt
-import numpy as np
-from metpy.plots import ctables
-from scipy.interpolate import griddata
-from multiprocessing import Pool, cpu_count, BoundedSemaphore
-from metpy.io import Level2File
-from botocore.client import Config
-from metpy.plots import add_timestamp, ctables
-from mpl_toolkits.axes_grid1 import make_axes_locatable
-import numpy as np
-import gzip
-import io
+import pytz
 
-BUCKET_NAME = "noaa-nexrad-level2"
+rs = RadarServer('http://tds-nexrad.scigw.unidata.ucar.edu/thredds/radarServer/nexrad/level2/S3/')
+query = rs.query()
 
-s3_resource = boto3.resource('s3', config=Config(signature_version=UNSIGNED, user_agent_extra='Resource'))
+dt = datetime(2007, 12, 5, 12, 12, 0, tzinfo=pytz.UTC)
+query.stations('KLVX').time_range(dt, dt + timedelta(hours=1))
 
-bucket = s3_resource.Bucket(BUCKET_NAME)
+rs.validate_query(query)
 
-# URL of the .gz file
-url = "https://noaa-nexrad-level2.s3.amazonaws.com/2007/08/27/KTLX/KTLX20070827_151313.gz"
+catalog = rs.get_catalog(query)
 
-# Step 1: Download the file into memory
-response = requests.get(url)
-response.raise_for_status()  # Ensure successful download
+print(catalog.datasets)
 
+data = catalog.datasets[0].remote_access()
 
-# Use MetPy to read the file
-with gzip.GzipFile(fileobj=io.BytesIO(response.content), mode='rb') as gz_file:
-  f = Level2File(gz_file)
+def raw_to_masked_float(var, data):
+    # Values come back signed. If the _Unsigned attribute is set, we need to convert
+    # from the range [-127, 128] to [0, 255].
+    if hasattr(var, "_Unsigned") and var._Unsigned:
+        data = data & 255
+
+    # Mask missing points
+    data = np.ma.array(data, mask=data==0)
+
+    # Convert to float using the scale and offset
+    return data * var.scale_factor + var.add_offset
+
+def polar_to_cartesian(az, rng):
+    az_rad = np.deg2rad(az)[:, None]
+    x = rng * np.sin(az_rad)
+    y = rng * np.cos(az_rad)
+    return x, y
+
+print(data.variables.keys())
+
 
 sweep = 0
-# First item in ray is header, which has azimuth angle
-az = np.array([ray[0].az_angle for ray in f.sweeps[sweep]])
 
-ref_hdr = f.sweeps[sweep][0][4][b'REF'][0]
-ref_range = np.arange(ref_hdr.num_gates) * ref_hdr.gate_width + ref_hdr.first_gate
-ref = np.array([ray[4][b'REF'][1] for ray in f.sweeps[sweep]])
+reflectivity_labels = ['Reflectivity_HI', 'Reflectivity']
+for reflectivity_label in reflectivity_labels:
+    try:
+        ref_var = data.variables[reflectivity_label]
+        break
+    except:
+        continue
 
-rho_hdr = f.sweeps[sweep][0][4][b'RHO'][0]
-rho_range = (np.arange(rho_hdr.num_gates + 1) - 0.5) * rho_hdr.gate_width + rho_hdr.first_gate
-rho = np.array([ray[4][b'RHO'][1] for ray in f.sweeps[sweep]])
+ref_data = ref_var[sweep]
 
-phi_hdr = f.sweeps[sweep][0][4][b'PHI'][0]
-phi_range = (np.arange(phi_hdr.num_gates + 1) - 0.5) * phi_hdr.gate_width + phi_hdr.first_gate
-phi = np.array([ray[4][b'PHI'][1] for ray in f.sweeps[sweep]])
+distance_labels = ['distanceR_HI', 'distanceR']
+for distance_label in distance_labels:
+    try:
+        rng = data.variables[distance_label][:]
+        break
+    except:
+        continue
 
-zdr_hdr = f.sweeps[sweep][0][4][b'ZDR'][0]
-zdr_range = (np.arange(zdr_hdr.num_gates + 1) - 0.5) * zdr_hdr.gate_width + zdr_hdr.first_gate
-zdr = np.array([ray[4][b'ZDR'][1] for ray in f.sweeps[sweep]])
+azimuth_labels = ['azimuthR_HI', 'azimuthR']
+for azimuth_label in azimuth_labels:
+    try:
+        az = data.variables[azimuth_label][sweep]
+        break
+    except:
+        continue
 
-# Get the NWS reflectivity colortable from MetPy
-ref_norm, ref_cmap = ctables.registry.get_with_steps('NWSReflectivity', 5, 5)
+ref = raw_to_masked_float(ref_var, ref_data)
+x, y = polar_to_cartesian(az, rng)
 
-# Plot the data!
-fig, axes = plt.subplots(2, 2, figsize=(15, 15))
-for var_data, var_range, colors, lbl, ax in zip((ref, rho, zdr, phi),
-                                                (ref_range, rho_range, zdr_range, phi_range),
-                                                (ref_cmap, 'plasma', 'viridis', 'viridis'),
-                                                ('REF (dBZ)', 'RHO', 'ZDR (dBZ)', 'PHI'),
-                                                axes.flatten()):
-    # Turn into an array, then mask
-    data = np.ma.array(var_data)
-    data[np.isnan(data)] = np.ma.masked
+ref_norm, ref_cmap = mpplots.ctables.registry.get_with_steps('NWSReflectivity', 5, 5)
 
-    # Convert az,range to x,y
-    xlocs = var_range * np.sin(np.deg2rad(az[:, np.newaxis]))
-    ylocs = var_range * np.cos(np.deg2rad(az[:, np.newaxis]))
+def new_map(fig, lon, lat):
+    # Create projection centered on the radar. This allows us to use x
+    # and y relative to the radar.
+    proj = ccrs.LambertConformal(central_longitude=lon, central_latitude=lat)
 
-    # Define norm for reflectivity
-    norm = ref_norm if colors == ref_cmap else None
+    # New axes with the specified projection
+    ax = fig.add_axes([0.02, 0.02, 0.96, 0.96], projection=proj)
 
-    # Plot the data
-    a = ax.pcolormesh(xlocs, ylocs, data, cmap=colors, norm=norm)
+    # Add coastlines and states
+    ax.add_feature(cfeature.COASTLINE.with_scale('50m'), linewidth=2)
+    ax.add_feature(cfeature.STATES.with_scale('50m'))
+    
+    return ax
 
-    divider = make_axes_locatable(ax)
-    cax = divider.append_axes('right', size='5%', pad=0.05)
-    fig.colorbar(a, cax=cax, orientation='vertical', label=lbl)
 
-    ax.set_aspect('equal', 'datalim')
-    ax.set_xlim(-100, 100)
-    ax.set_ylim(-100, 100)
-    add_timestamp(ax, f.dt, y=0.02, high_contrast=False)
-plt.suptitle('KVWX Level 2 Data', fontsize=20)
-plt.tight_layout()
-plt.savefig("test.png")
+fig = plt.figure(figsize=(10, 10))
+ax = new_map(fig, data.StationLongitude, data.StationLatitude)
+ax.pcolormesh(x, y, ref, cmap=ref_cmap, norm=ref_norm, zorder=0)
+
+fig.savefig("test.png")
